@@ -731,7 +731,7 @@ static void av_rx(struct link *l, const unsigned char *p, size_t n)
     int mine = av.l == l, seid = dn >= 1 ? d[0] >> 2 : 0; const struct a2dp_codec *codec = sep_codec(seid);
     int ours = mine && seid == av.sep;                      /* the endpoint this link has configured */
     switch (sig) {
-    case AV_DISCOVER:
+    case AV_DISCOVER: {
         int k = 0;
         for (int i = 0; i < nseps; i++) {                   /* in use: taken by the stream, or by another source */
             if (!sep_codec(i + 1)) continue;                /* AAC while it is off */
@@ -740,7 +740,7 @@ static void av_rx(struct link *l, const unsigned char *p, size_t n)
             k++;
         }
         av_reply(l, label, sig, 1, r, 2 * k);
-        break;
+        break; }
     case AV_GET_CAP: case AV_GET_ALL_CAP:
         if (!codec) { r[0] = E_BAD_ACP_SEID; av_reply(l, label, sig, 0, r, 1); break; }
         av_reply(l, label, sig, 1, r, caps_of(codec, codec->caps, codec->ncaps, sig == AV_GET_ALL_CAP, r));
