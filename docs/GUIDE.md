@@ -325,7 +325,7 @@ and the action button pauses and resumes.
   Echo's announcements (another subnet or VLAN), add `<echo-ip>:28928` under its Sendspin provider's "Manual IP
   addresses for discovery": with the port, since a bare address means Sendspin's default 8928, which is not the Echo's.
 - **From a phone** over Bluetooth: SBC, AAC, aptX, aptX HD, with media controls. Switch on "Bluetooth audio from phones" on the
-  settings page; the "Bluetooth pairing" switch in Home Assistant then lets phones pair (blue chaser on the ring).
+  settings page; the "Bluetooth phones: pairing" switch in Home Assistant then lets phones pair (blue chaser on the ring).
 
 ### Separate volumes
 
@@ -360,28 +360,28 @@ Everything the Echo plays (replies, timers, its sounds, music) can come out of a
 stock.
 
 1. Switch on "Play on a Bluetooth speaker" on the settings page; its entities appear in Home Assistant.
-2. Put the speaker in pairing mode near the Echo and switch on "Bluetooth speaker search".
+2. Put the speaker in pairing mode near the Echo and switch on "Bluetooth speaker: search".
 3. Within a minute the Echo pairs with the strongest one it hears (speakers, headphones, PCs that offer to play audio)
    and plays on it.
 
 You cannot pick from a list: Home Assistant reads an ESPHome select's choices only when it connects, so keep only the
-speaker you want in pairing mode. "Play on Bluetooth speaker" switches between it and the Echo; the Echo reconnects by
-itself when the speaker comes back, and takes it when the speaker calls on switching on. "Bluetooth speaker" shows its
+speaker you want in pairing mode. "Bluetooth speaker: play on it" switches between it and the Echo; the Echo reconnects by
+itself when the speaker comes back, and takes it when the speaker calls on switching on. "Bluetooth speaker: status" shows its
 name and state.
 
 - **Volume**: while on the speaker, the volume buttons, Home Assistant and Music Assistant set the speaker's volume, and
   the ring shows it; the speaker's own buttons move it too. Back on the Echo, its own volume returns. With Bluetooth
   absolute volume (most speakers) the Echo sends full level and the speaker turns it down, which sounds best; without,
   the Echo turns it down itself, as stock does. [Separate volumes](#separate-volumes) apply on the speaker too.
-- **In time with other players**: a Bluetooth speaker plays late, by its buffer. "Bluetooth speaker delay" (default
+- **In time with other players**: a Bluetooth speaker plays late, by its buffer. "Bluetooth speaker: delay" (default
   250 ms) is what the Echo allows for; set it by ear, in Home Assistant or on the settings page.
 - **First word cut off**: some speakers switch their amplifier off while the Echo is silent and switch it on only
   once sound comes, too late for the start of a reply. "Keep the speaker awake" (settings page, off by default) plays
   a 20 Hz tone at -50 dBFS under everything, too low and too quiet to hear, so the speaker never hears silence.
 - **Switching quickly**: the Echo can only play everything on one or the other (Amazon's audio mixer has a single
-  output), so music on the speaker with replies on the Echo is a matter of switching "Play on Bluetooth speaker" from an
+  output), so music on the speaker with replies on the Echo is a matter of switching "Bluetooth speaker: play on it" from an
   automation when music starts and stops. "Stay connected when off" (settings page, off by default) makes that quick:
-  switched off, the speaker stays connected and only the sound moves back to the Echo ("Bluetooth speaker" shows
+  switched off, the speaker stays connected and only the sound moves back to the Echo ("Bluetooth speaker: status" shows
   "Standing by"), and switching on takes well under a second instead of a reconnect. If the speaker drops the link
   meanwhile, the Echo connects again only once the switch is on. With "Keep the speaker awake" as well, the Echo keeps
   sending its inaudible tone while standing by, against speakers that switch themselves off when idle; whether that
@@ -410,10 +410,16 @@ While a phone plays, the proxy stops scanning: the radio cannot do both without 
 | Stop ringing | button: ends a ringing timer and nothing else |
 | Button | event: each press and 1 s hold of the action and volume buttons, see [Buttons and light ring](#buttons-and-light-ring) |
 | Light ring | light: colour, brightness, effects; the Echo's own lights first, see [Buttons and light ring](#buttons-and-light-ring) |
-| Firmware | update entity, see [Updating](../README.md#updating) |
+| Firmware | diagnostic text: the running version; updates are pushed from your PC, see [Updating](../README.md#updating) |
 | Identify, Restart, Factory reset | buttons; Restart reboots the Echo |
 | Web UI address | diagnostic: the settings page's address |
 | Sendspin pairing token | diagnostic, disabled by default |
+| Mic level, Noise reduction | configuration: the level the pipeline gets, RNNoise (off / low / medium / high) |
+| Bluetooth phones: pairing, announcements, announcement language | configuration; "Bluetooth speaker: …" for the other direction, see below |
+| Debug access (adb over Wi-Fi) | configuration: opens adb for 30 minutes, only over the encrypted connection |
+| Music Assistant without pairing | configuration: any Music Assistant on the network may play |
+| Sound detection, Wi-Fi motion detection, Join arbitration network | the switches of the features below: the rest of a feature's entities appears while it is on |
+| SoC temperature, CPU usage | diagnostic, disabled by default |
 
 Time and time zone: the Echo takes both from Home Assistant, over the encrypted connection only (no time before
 Home Assistant has given it its key), when it connects and every 6 hours. Change Home Assistant's time zone and the Echo
@@ -435,20 +441,18 @@ Echo announces itself again after 100 s without Home Assistant, then less and le
 | Wake word events (off by default) | Wake word (event): `detected` (the Echo took it), `near_miss` (Amazon's engine heard something close, did not wake; none with microWakeWord), `answered_elsewhere` (another Echo or satellite answered), `no_speech` (woke, nothing said). A `detected` followed by `no_speech` is a false wake. Nothing while muted. Near misses can come often while the TV plays: an entry in Home Assistant's history each |
 | [Wi-Fi motion](#wi-fi-motion) | motion sensor, sensitivity |
 | Light sensor (off by default) | Illuminance (the room's light in lux); "LED brightness" then also follows auto brightness, an entry in the logbook every few minutes. Off, it shows only levels you set |
-| Bluetooth audio from phones | Bluetooth pairing |
-| [Playing on a Bluetooth speaker](#playing-on-a-bluetooth-speaker) | Bluetooth speaker search, Play on Bluetooth speaker, Bluetooth speaker, Bluetooth speaker delay |
+| Bluetooth audio from phones | Bluetooth phones: pairing |
+| [Playing on a Bluetooth speaker](#playing-on-a-bluetooth-speaker) | Bluetooth speaker: search, Bluetooth speaker: play on it, Bluetooth speaker: status, Bluetooth speaker: delay |
 | [Separate volumes](#separate-volumes) (off by default, on the Volume card) | Assistant volume, Sounds volume, Timer volume, Call volume (each while it has its own; calls with Drop In) |
 
-**On the settings page only**:
+**Also on the settings page** (the entities above are the same settings):
 
 - "Mic level": how loud speech reaches the voice assistant, −35 to −15 dBFS (default −26); the Echo adjusts its gain.
 - "Noise reduction": off by default; low, medium, high take the background down by up to 6, 9 or 12 dB (RNNoise, on
   what the voice assistant gets).
 - "Wake sound removal" (experimental, under Features): off by default; takes the wake sound out of what the voice
-  assistant gets (see [Voice](#voice)).
-- "Timers ring for": 1 minute by default, 10 s to 10 min, or until stopped.
-- Bluetooth announcements and their language, debug access (adb over Wi-Fi), SoC
-  temperature and CPU usage.
+  assistant gets (see [Voice](#voice)). Page only.
+- "Timers ring for": 1 minute by default, 10 s to 10 min, or until stopped. Page only.
 - "Music Assistant without pairing": off by default, so only Sendspin servers paired with the token may play.
 
 ## Sound detection

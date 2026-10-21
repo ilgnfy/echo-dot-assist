@@ -593,12 +593,12 @@ static void send_setting_entities(void)
     if (listed(KEY_WAKE)) { PB(b, 192); pb_str(&b, 1, "wake_word"); pb_fixed32(&b, 2, KEY_WAKE); pb_str(&b, 3, "Wake word"); pb_str(&b, 5, "mdi:account-voice");
       for (int i = 0; i < core_wake_nevents; i++) pb_str(&b, 9, core_wake_events[i]);
       send_msg(LIST_EVENT, &b); }
-    if (listed(KEY_BT_PAIRING)) { PB(b, 128); pb_str(&b, 1, "bluetooth_pairing"); pb_fixed32(&b, 2, KEY_BT_PAIRING); pb_str(&b, 3, "Bluetooth pairing");
+    if (listed(KEY_BT_PAIRING)) { PB(b, 128); pb_str(&b, 1, "bluetooth_pairing"); pb_fixed32(&b, 2, KEY_BT_PAIRING); pb_str(&b, 3, "Bluetooth phones: pairing");
       pb_str(&b, 5, "mdi:bluetooth-connect"); send_msg(LIST_SWITCH, &b); }
-    if (listed(KEY_BT_ANNOUNCE)) { PB(b, 128); pb_str(&b, 1, "bluetooth_announcements"); pb_fixed32(&b, 2, KEY_BT_ANNOUNCE); pb_str(&b, 3, "Bluetooth announcements");
+    if (listed(KEY_BT_ANNOUNCE)) { PB(b, 128); pb_str(&b, 1, "bluetooth_announcements"); pb_fixed32(&b, 2, KEY_BT_ANNOUNCE); pb_str(&b, 3, "Bluetooth phones: announcements");
       pb_str(&b, 5, "mdi:bluetooth-audio"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_BT_LANG)) { PB(b, 512); pb_str(&b, 1, "bluetooth_announcement_language"); pb_fixed32(&b, 2, KEY_BT_LANG);
-      pb_str(&b, 3, "Bluetooth announcement language"); pb_str(&b, 5, "mdi:translate");
+      pb_str(&b, 3, "Bluetooth phones: announcement language"); pb_str(&b, 5, "mdi:translate");
       for (int i = 0; i < bt_lang_count; i++) pb_str(&b, 6, bt_langs[i].name);
       pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
     /* a root shell without a password for the whole network while it is on: closes by itself after 30 min (lockdown.sh) */
@@ -606,14 +606,14 @@ static void send_setting_entities(void)
       pb_str(&b, 5, "mdi:console-network"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     /* playing to a Bluetooth speaker: the search pairs the nearest one in pairing mode and switches playing on it on */
     if (listed(KEY_BT_OUT)) {
-        { PB(b, 160); pb_str(&b, 1, "bluetooth_speaker_search"); pb_fixed32(&b, 2, KEY_BT_OUT_SEARCH); pb_str(&b, 3, "Bluetooth speaker search");
+        { PB(b, 160); pb_str(&b, 1, "bluetooth_speaker_search"); pb_fixed32(&b, 2, KEY_BT_OUT_SEARCH); pb_str(&b, 3, "Bluetooth speaker: search");
           pb_str(&b, 5, "mdi:speaker-wireless"); send_msg(LIST_SWITCH, &b); }
-        { PB(b, 160); pb_str(&b, 1, "play_on_bluetooth_speaker"); pb_fixed32(&b, 2, KEY_BT_OUT); pb_str(&b, 3, "Play on Bluetooth speaker");
+        { PB(b, 160); pb_str(&b, 1, "play_on_bluetooth_speaker"); pb_fixed32(&b, 2, KEY_BT_OUT); pb_str(&b, 3, "Bluetooth speaker: play on it");
           pb_str(&b, 5, "mdi:speaker-bluetooth"); send_msg(LIST_SWITCH, &b); }
-        { PB(b, 160); pb_str(&b, 1, "bluetooth_speaker"); pb_fixed32(&b, 2, KEY_BT_OUT_STATUS); pb_str(&b, 3, "Bluetooth speaker");
+        { PB(b, 160); pb_str(&b, 1, "bluetooth_speaker"); pb_fixed32(&b, 2, KEY_BT_OUT_STATUS); pb_str(&b, 3, "Bluetooth speaker: status");
           pb_str(&b, 5, "mdi:speaker"); send_msg(LIST_TEXT_SENSOR, &b); }
         /* what the speaker adds to the Echo's own latency, for Sendspin's sync with other players: speakers differ */
-        { PB(b, 192); pb_str(&b, 1, "bluetooth_speaker_delay"); pb_fixed32(&b, 2, KEY_BT_OUT_DELAY); pb_str(&b, 3, "Bluetooth speaker delay");
+        { PB(b, 192); pb_str(&b, 1, "bluetooth_speaker_delay"); pb_fixed32(&b, 2, KEY_BT_OUT_DELAY); pb_str(&b, 3, "Bluetooth speaker: delay");
           pb_str(&b, 5, "mdi:timer-sand"); pb_float(&b, 6, 0); pb_float(&b, 7, 1000); pb_float(&b, 8, 10); pb_uint(&b, 10, 1);
           pb_str(&b, 11, "ms"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b); }
     }
