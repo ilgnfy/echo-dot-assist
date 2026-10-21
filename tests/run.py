@@ -37,7 +37,8 @@ TESTS = [
     ("web", [PY, "tests/fake_web.py"]),
     ("wakesound", [PY, "tests/fake_ha_wakesound.py"]),
     ("ota-push", ["sh", "tests/ota_push_test.sh"]),
-    ("boot", ["sh", "tests/boot_test.sh"]),                  # main.sh itself against stand-ins (mksh where there is one)
+    ("boot", ["sh", "tests/boot_test.sh"]),
+    ("lockdown", ["sh", "tests/lockdown_test.sh"]),             # adb over Wi-Fi in lockdown.sh against iptables stand-ins                  # main.sh itself against stand-ins (mksh where there is one)
     ("ring", [PY, "tests/fake_ha_ring.py"]),
     ("ring-designs", [PY, "tests/fake_web_ring.py"]),
     ("artifacts", [PY, "tests/fake_web_artifacts.py"]),

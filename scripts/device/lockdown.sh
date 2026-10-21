@@ -44,7 +44,8 @@ NL='
 # state/config says arbitration_mode=kiosk, and taken out again when it does not.  hassmic reads nothing there but
 # those claims.  Not in stock-online mode: no hassmic runs then.
 KIOSK_IN="INPUT -i $WLAN -p udp -m udp --dport 2330 -j ACCEPT"
-kiosk_state() { KIOSK=; [ -z "$OTA_ONLY" ] && grep -qx 'arbitration_mode=kiosk' /data/local/hassmic/state/config 2>/dev/null && KIOSK=1; }
+BASE=${HASSMIC_BASE:-/data/local/hassmic}      # only tests/lockdown_test.sh sets it
+kiosk_state() { KIOSK=; [ -z "$OTA_ONLY" ] && grep -qx 'arbitration_mode=kiosk' $BASE/state/config 2>/dev/null && KIOSK=1; }
 
 HAVE6=; command -v ip6tables > /dev/null && HAVE6=1
 v6off() { for f in /proc/sys/net/ipv6/conf/*/disable_ipv6; do echo 1 > $f || echo "!! IPv6 NOT OFF ($f): take the Echo offline"; done; }
@@ -91,7 +92,7 @@ keep() {
             case $d in 224.*|255.*) continue;; esac
             echo "-A INPUT -s $d -i $WLAN -p icmp -m icmp --icmp-type 8 -j ACCEPT"
         done
-        if [ -n "$ADB" ]; then echo "-A $ADB_IN"; fi                       # only while adb over Wi-Fi is open (adb_gate)
+        if [ -n "$ADB" ]; then echo "-A $(adb_rule)"; fi                  # only while adb over Wi-Fi is open (adb_gate)
         if [ -n "$KIOSK" ]; then echo "-A $KIOSK_IN"; fi                   # only in Kiosk Satellite mode (kiosk_state)
     else
         echo "-A INPUT -p icmpv6 -j ACCEPT"                                # neighbour discovery: no IPv6 without it
@@ -116,27 +117,56 @@ missing() { keep $1 | while read -r r; do case "$NL$2$NL" in *"$NL$r$NL"*) ;; *)
 # adbd takes the port from the property at its start, hence the restart.  ctl.restart and not stop + start: run from
 # an adb shell this script dies with adbd, and it would be between the two.  Dot 2, 2026-09-30: port 0 + restart, USB
 # back within 8 s, nothing listening on 5555, connect refused from the PC; 5555 + restart, listening again.
-HCONF=/data/local/hassmic/hassmic.conf
-ADB_REQ=/data/local/hassmic/state/adb-request
-ADB_OPEN=/data/local/hassmic/adb-open
+HCONF=$BASE/hassmic.conf
+ADB_REQ=$BASE/state/adb-request
+ADB_OPEN=$BASE/adb-open
 ADB_SECS=1800
 ADB_IN="INPUT -p tcp -m tcp --dport 5555 -j ACCEPT"          # stock's rule, as "iptables -S" prints it
+# Opened with the update key (scripts/adb-wifi.sh, src/hassmic/ota.c), adb is for the address that signed the request and
+# no other: the request file's second line, set as hassmic.adb.from while the window lasts.  The Home Assistant switch and
+# ADB_WIFI=1 admit the network, as stock's rule did.
+ADB_FROM=
+# a strict dotted quad: four plain decimal octets, nothing iptables could read another way (010, 1.2.3, 1.2.3.4/0, a name)
+ipv4() {
+    local IFS=. o; set -- $1
+    [ $# = 4 ] || return 1
+    for o in "$@"; do
+        case $o in ""|*[!0-9]*|0?*) return 1;; esac
+        [ ${#o} -le 3 ] && [ "$o" -le 255 ] || return 1
+    done
+}
+# the rule that is to admit adb now, as "iptables -S" prints it (after "-A ")
+adb_rule() { if [ -n "$ADB_FROM" ]; then echo "INPUT -s $ADB_FROM/32 -p tcp -m tcp --dport 5555 -j ACCEPT"; else echo "$ADB_IN"; fi; }
+adb_for() { if [ -n "$ADB_FROM" ]; then echo "$ADB_FROM/32"; else echo "everyone on the network"; fi; }
+# the rules in the listing $1 that admit port 5555 and are not the one wanted now (none wanted when adb is closed), as "-D ..."
+adb_stale() {
+    echo "$1" | while read -r r; do
+        case "$r" in "-A INPUT "*"--dport 5555 -j ACCEPT") [ -n "$ADB" ] && [ "$r" = "-A $(adb_rule)" ] || echo "-D ${r#-A }";; esac
+    done
+}
 up() { read -r upt _ < /proc/uptime; echo ${upt%.*}; }
 # ADB=1 if it is to be open now, ADB_WHY says on whose account
 adb_state() {
-    ADB=; ADB_WHY=
+    ADB=; ADB_WHY=; ADB_FROM=
     if grep -q -e '^ADB_WIFI=1' -e '^ADB_WIFI="1' $HCONF 2>/dev/null; then ADB=1; ADB_WHY="ADB_WIFI=1 in hassmic.conf"; return; fi
     u=$(getprop hassmic.adb.until)
-    if [ "${u:-0}" -gt "$(up)" ] 2>/dev/null; then ADB=1; ADB_WHY="asked for through hassmic, $(( (u - $(up) + 59) / 60 )) min left"; fi
+    if [ "${u:-0}" -gt "$(up)" ] 2>/dev/null; then
+        ADB=1; ADB_WHY="asked for through hassmic, $(( (u - $(up) + 59) / 60 )) min left"
+        f=$(getprop hassmic.adb.from); if [ -n "$f" ] && ipv4 "$f"; then ADB_FROM=$f; ADB_WHY="$ADB_WHY, for $f only"; fi
+    fi
 }
 # a socket listening on port 5555 (hex 15B3, state 0A), IPv4 or IPv6; no awk on the Echo
 adb_listening() { grep -qE '^ *[0-9]+: [0-9A-F]+:15B3 [0-9A-F]+:0000 0A ' /proc/net/tcp /proc/net/tcp6 2>/dev/null; }
 # Take a request, then make adbd what it has to be.  True if that changed (the rules then have to follow).
 adb_gate() {
-    req=; got=
+    req=; got=; was=$ADB_FROM
     if [ -f $ADB_REQ ] && [ ! -L $ADB_REQ ]; then
-        got=1; read -r req < $ADB_REQ
-        if [ "$req" = 1 ]; then setprop hassmic.adb.until $(($(up) + ADB_SECS)); else setprop hassmic.adb.until 0; fi
+        got=1; src=; { read -r req; read -r src; } < $ADB_REQ
+        if [ -n "$src" ] && ! ipv4 "$src"; then            # a source that is no plain dotted quad: refused, not widened to the network
+            echo "adb over Wi-Fi: request for a source that is not one IPv4 address refused"; req=0; src=
+        fi
+        if [ "$req" = 1 ]; then setprop hassmic.adb.until $(($(up) + ADB_SECS)); setprop hassmic.adb.from "$src"
+        else setprop hassmic.adb.until 0; setprop hassmic.adb.from ""; fi
     fi
     adb_state
     port=$(getprop service.adb.tcp.port); changed=1
@@ -145,7 +175,7 @@ adb_gate() {
     run=; [ "$(getprop init.svc.adbd)" = running ] && run=1
     if [ -n "$ADB" ] && [ "$port" != 5555 ]; then
         setprop service.adb.tcp.port 5555; ADB_RESTART=$run; changed=0
-        echo "adb over Wi-Fi OPEN: a root shell for everyone on the network, no password ($ADB_WHY)"
+        echo "adb over Wi-Fi OPEN: a root shell for $(adb_for), no password ($ADB_WHY)"
     elif [ -z "$ADB" ] && [ "$port" = 5555 ]; then
         setprop service.adb.tcp.port 0; ADB_RESTART=$run; changed=0
         echo "adb over Wi-Fi closed, USB only (uptime $(up)s)"
@@ -155,6 +185,7 @@ adb_gate() {
         ADB_RESTART=1; changed=0
         echo "adbd still listened on 5555 with adb over Wi-Fi closed: restarted"
     fi
+    [ -n "$ADB" ] && [ "$ADB_FROM" != "$was" ] && [ "$port" = 5555 ] && { changed=0; echo "adb over Wi-Fi now open for $(adb_for)"; }
     # the answer hassmic reads, then the request: gone means answered
     if [ -n "$ADB" ]; then [ -f $ADB_OPEN ] || : > $ADB_OPEN; else rm -f $ADB_OPEN; fi
     [ -z "$got" ] || rm -f $ADB_REQ
@@ -178,7 +209,7 @@ load_once() {
         echo "$all" | while read -r r; do [ "$r" = "-A OUTPUT -j hassmic_out" ] && echo "-D OUTPUT -j hassmic_out"; done
         echo "-I OUTPUT 1 -j hassmic_out"
         missing $1 "$all"
-        [ -n "$ADB" ] || echo "$all" | while read -r r; do [ "$r" = "-A $ADB_IN" ] && echo "-D $ADB_IN"; done
+        adb_stale "$all"
         [ -n "$KIOSK" ] || echo "$all" | while read -r r; do [ "$r" = "-A $KIOSK_IN" ] && echo "-D $KIOSK_IN"; done
         echo COMMIT
     )
@@ -199,7 +230,7 @@ load_each() {
     while $1 -w -D OUTPUT -j hassmic_out 2>/dev/null; do :; done
     $1 -w -I OUTPUT 1 -j hassmic_out
     missing $1 "$($1 -w -S)" | while read -r r; do $1 -w $r || echo "!! rule not loaded ($1): $r"; done
-    [ -n "$ADB" ] || while $1 -w -D $ADB_IN 2>/dev/null; do :; done
+    adb_stale "$($1 -w -S)" | while read -r r; do $1 -w $r 2>/dev/null; done
     [ -n "$KIOSK" ] || while $1 -w -D $KIOSK_IN 2>/dev/null; do :; done
     $1 -w -P INPUT DROP
 }
@@ -229,7 +260,7 @@ wrong() {
         all=$($t -w -S 2>/dev/null)
         case "$NL$all" in *"$NL-P INPUT DROP$NL"*) ;; *) echo "$t: INPUT policy is not DROP"; return 1;; esac
         m=$(missing $t "$all"); [ -z "$m" ] || { echo "$t: missing:" $m; return 1; }
-        [ -n "$ADB" ] || case "$NL$all$NL" in *"$NL-A $ADB_IN$NL"*) echo "$t: port 5555 (adb) admitted"; return 1;; esac
+        st=$(adb_stale "$all"); [ -z "$st" ] || { st=${st%%"$NL"*}; echo "$t: port 5555 (adb) admitted: -A ${st#-D }"; return 1; }
         [ -n "$KIOSK" ] || case "$NL$all$NL" in *"$NL-A $KIOSK_IN$NL"*) echo "$t: port 2330 (Kiosk Satellite) admitted"; return 1;; esac
     done
     [ -n "$HAVE6" ] || for f in /proc/sys/net/ipv6/conf/*/disable_ipv6; do

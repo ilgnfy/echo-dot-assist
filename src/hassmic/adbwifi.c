@@ -39,16 +39,20 @@ int adbwifi_open(void)
 
 int adbwifi_granted(void) { return access(req_path(), F_OK) && !access(open_path(), F_OK); }
 
-void adbwifi_ask(int on)
+static void ask(int on, const char *ip)
 {
-    if (statefile_write(req_path(), 0666, on ? "1\n" : "0\n", 2)) {
+    char body[64]; int n = snprintf(body, sizeof body, on ? "1\n" : "0\n");
+    if (on && ip) n += snprintf(body + n, sizeof body - (size_t)n, "%s\n", ip);     /* the second line: the one address */
+    if (statefile_write(req_path(), 0666, body, (size_t)n)) {
         fprintf(stderr, "adb over Wi-Fi: cannot write %s\n", req_path());
         return;
     }
     asked_at = now();
     atomic_store(&asked, on != 0);
-    fprintf(stderr, "adb over Wi-Fi: asked to %s it\n", on ? "open" : "close");
+    fprintf(stderr, "adb over Wi-Fi: asked to %s it%s%s\n", on ? "open" : "close", on && ip ? " for " : "", on && ip ? ip : "");
 }
+void adbwifi_ask(int on) { ask(on, NULL); }
+void adbwifi_ask_from(const char *ip) { ask(1, ip); }
 
 static void *watcher(void *arg)
 {

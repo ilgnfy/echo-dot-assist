@@ -29,10 +29,11 @@ r=$(printf 'GET / HTTP/1.0\n' | timeout 10 nc -N 127.0.0.1 16972 2>/dev/null || 
 # adb over Wi-Fi with the update key.  This script is the firewall watcher: it takes the request and answers with adb-open.
 watcher() {
     for i in $(seq 1 40); do [ -f $T/state/adb-request ] && break; sleep 0.25; done
-    [ "$(cat $T/state/adb-request 2>/dev/null)" = 1 ] && : > $T/adb-open; rm -f $T/state/adb-request
+    { read -r want; read -r src; } < $T/state/adb-request 2>/dev/null     # line 1: open (1); line 2: the one address that signed
+    [ "$want" = 1 ] && [ "$src" = 127.0.0.1 ] && : > $T/adb-open; rm -f $T/state/adb-request
 }
 watcher & r=$($O adb 127.0.0.1 16972 $T/k.sec); wait $!
-[ "$r" = "OK adb over Wi-Fi open for 30 min" ] && [ -f $T/adb-open ]; ok $? "update key opens adb over Wi-Fi: $r"
+[ "$r" = "OK adb over Wi-Fi open for 30 min, for 127.0.0.1 only" ] && [ -f $T/adb-open ]; ok $? "update key opens adb over Wi-Fi, for the signer's address only: $r"
 rm -f $T/adb-open
 r=$($O adb 127.0.0.1 16972 $T/evil.sec); echo "$r" | grep -q "^FAILED signature" && [ ! -f $T/state/adb-request ]; ok $? "another key does not, and asks for nothing: $r"
 # a recorded answer does not work again: the challenge differs each time

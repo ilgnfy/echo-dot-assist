@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -123,10 +125,15 @@ void ota_healthy(void)
 static void adb_open(int fd, const uint8_t pk[32], long long by)
 {
     if (challenge(fd, pk, "HMOTA-ADB1", by)) return;
-    fprintf(stderr, "update: adb over Wi-Fi asked for with the update key\n");
-    adbwifi_ask(1);
+    /* the key holder's own address, not the network's: whoever signed is who gets the root shell (lockdown.sh admits just it) */
+    struct sockaddr_in a; socklen_t al = sizeof a; char ip[INET_ADDRSTRLEN];
+    if (getpeername(fd, (struct sockaddr *)&a, &al) || a.sin_family != AF_INET || !inet_ntop(AF_INET, &a.sin_addr, ip, sizeof ip)) {
+        reply(fd, "FAILED cannot tell the address this request came from"); return;
+    }
+    fprintf(stderr, "update: adb over Wi-Fi asked for with the update key from %s\n", ip);
+    adbwifi_ask_from(ip);
     for (int t = 0; t < 30; t++) {                      /* the firewall watcher looks every 5 s */
-        if (adbwifi_granted()) { reply(fd, "OK adb over Wi-Fi open for 30 min"); return; }
+        if (adbwifi_granted()) { char ok[96]; snprintf(ok, sizeof ok, "OK adb over Wi-Fi open for 30 min, for %s only", ip); reply(fd, ok); return; }
         usleep(500000);
     }
     reply(fd, "FAILED the firewall service did not answer (is hassmic_fw running?)");
