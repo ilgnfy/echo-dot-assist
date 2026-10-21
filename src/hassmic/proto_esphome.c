@@ -70,6 +70,7 @@
 #include "a2dp.h"
 #include "adbwifi.h"
 #include "arb.h"
+#include "diag.h"
 #include "dropin.h"
 #include "settings.h"
 #include "ble.h"
@@ -375,6 +376,7 @@ static void send_setting(int key)       /* lock held */
     case KEY_BT_OUT_STATUS:
         if (ble_present()) { PB(t, 160); char st[120]; a2dp_out_status(st, sizeof st); pb_fixed32(&t, 1, key); pb_str(&t, 2, st); send_state(TEXT_SENSOR_STATE, &t); }
         break;
+    case KEY_SOC_TEMP: case KEY_CPU_USAGE: break;                 /* pushed by diag_thread every 30 s */
     case KEY_FIRMWARE: pb_str(&b, 2, RUNNING_VERSION); send_state(TEXT_SENSOR_STATE, &b); break;
     }
 }
@@ -411,6 +413,22 @@ static void send_sensor(int key, float v)   /* lock held */
     if (isnan(v)) return;
     pb_fixed32(&b, 1, key); pb_float(&b, 2, v);
     send_state(SENSOR_STATE, &b);
+}
+
+/* SoC temperature and CPU usage (diag.c): pushed every 30 s to whoever subscribed to states */
+static void *diag_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        float t = diag_soc_temp(), c = diag_cpu();            /* the CPU figure blocks 250 ms: outside the lock */
+        pthread_mutex_lock(&core_lock);
+        int any = 0;
+        for (int i = 0; i < MAX_CLIENTS; i++) any |= clients[i].fd >= 0 && clients[i].states;
+        if (any) { send_sensor(KEY_SOC_TEMP, t); send_sensor(KEY_CPU_USAGE, c); }
+        pthread_mutex_unlock(&core_lock);
+        sleep(30);
+    }
+    return NULL;
 }
 
 /* ---------------------------------------------------------------- light sensor and LED brightness
@@ -493,9 +511,10 @@ static void send_light_entities(void)
 static int listed(int key)
 {
     switch (key) {
-    case KEY_MIC_LEVEL: case KEY_DENOISE: case KEY_BT_ANNOUNCE: case KEY_BT_LANG: case KEY_ADB_WIFI: case KEY_ARB_JOIN: case KEY_SS_UNPAIRED:
-    case KEY_SOUND_DETECTION: case KEY_WIFI_MOTION_ON: case KEY_SOC_TEMP: case KEY_CPU_USAGE: return 0;
-    case KEY_SENDSPIN_TOKEN: return core_sendspin_port != 0;
+    case KEY_BT_ANNOUNCE: case KEY_BT_LANG: return ble_present();
+    case KEY_ARB_JOIN: return arb_running();                      /* the switch that joins the rounds: always, the peers follow when on */
+    case KEY_WIFI_MOTION_ON: return wifimotion_present();
+    case KEY_SENDSPIN_TOKEN: case KEY_SS_UNPAIRED: return core_sendspin_port != 0;
     case KEY_SOUND: return settings_on("sound_detection");
     case KEY_WAKE: return settings_on("wake_events");
     case KEY_BT_PAIRING: return ble_present() && settings_on("bluetooth_audio");
@@ -524,14 +543,26 @@ static void send_setting_entities(void)
         PB(b, 192); pb_str(&b, 1, eq_ids[i]); pb_fixed32(&b, 2, KEY_EQ_BASS + i); pb_str(&b, 3, eq_labels[i]); pb_str(&b, 5, "mdi:tune-vertical");
         pb_float(&b, 6, -6); pb_float(&b, 7, 6); pb_float(&b, 8, 1); pb_str(&b, 11, "dB"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b);
     }
+    { PB(b, 256); pb_str(&b, 1, "mic_level"); pb_fixed32(&b, 2, KEY_MIC_LEVEL); pb_str(&b, 3, "Mic level"); pb_str(&b, 5, "mdi:microphone-plus");
+      pb_float(&b, 6, MICGAIN_LEVEL_MIN); pb_float(&b, 7, MICGAIN_LEVEL_MAX); pb_float(&b, 8, 1); pb_uint(&b, 10, 1); pb_str(&b, 11, "dBFS");
+      pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b); }
     { PB(b, 128); pb_str(&b, 1, "mute"); pb_fixed32(&b, 2, KEY_MUTE); pb_str(&b, 3, "Mute"); pb_str(&b, 5, "mdi:microphone-off"); send_msg(LIST_SWITCH, &b); }
     { PB(b, 128); pb_str(&b, 1, "do_not_disturb"); pb_fixed32(&b, 2, KEY_DND); pb_str(&b, 3, "Do not disturb"); pb_str(&b, 5, "mdi:minus-circle");
       send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_SENDSPIN_TOKEN)) { PB(b, 192); pb_str(&b, 1, "sendspin_pairing_token"); pb_fixed32(&b, 2, KEY_SENDSPIN_TOKEN); pb_str(&b, 3, "Sendspin pairing token");
       pb_str(&b, 5, "mdi:key-link"); pb_uint(&b, 6, 1); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
+    /* off (the default): only servers paired with the token above play; on: any Music Assistant on the LAN, unpaired */
+    if (listed(KEY_SS_UNPAIRED)) { PB(b, 192); pb_str(&b, 1, "sendspin_unpaired_access"); pb_fixed32(&b, 2, KEY_SS_UNPAIRED);
+      pb_str(&b, 3, "Music Assistant without pairing"); pb_str(&b, 5, "mdi:lock-open-variant"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    { PB(b, 128); pb_str(&b, 1, "noise_reduction"); pb_fixed32(&b, 2, KEY_DENOISE); pb_str(&b, 3, "Noise reduction"); pb_str(&b, 5, "mdi:waveform");
+      for (int i = 0; i < 4; i++) pb_str(&b, 6, denoise_names[i]);
+      pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
     { PB(b, 128); pb_str(&b, 1, "wake_sound"); pb_fixed32(&b, 2, KEY_WAKE_SOUND); pb_str(&b, 3, "Wake sound"); pb_str(&b, 5, "mdi:bell-ring");
       pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
-    /* Sound detection (sound.h): one event entity whose event type names the sound; Home Assistant keeps each with its
+    /* Sound detection (sound.h): the switch (off by default: a second decoder on the mic stream) */
+    { PB(b, 128); pb_str(&b, 1, "sound_detection"); pb_fixed32(&b, 2, KEY_SOUND_DETECTION); pb_str(&b, 3, "Sound detection");
+      pb_str(&b, 5, "mdi:ear-hearing"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    /* and one event entity whose event type names the sound; Home Assistant keeps each with its
      * time, automations trigger on the type. */
     if (listed(KEY_SOUND)) { PB(b, 384); pb_str(&b, 1, "sound"); pb_fixed32(&b, 2, KEY_SOUND); pb_str(&b, 3, "Sound"); pb_str(&b, 5, "mdi:waveform");
       for (int i = 0; i < core_sound_nevents; i++) pb_str(&b, 9, core_sound_events[i]);
@@ -547,6 +578,15 @@ static void send_setting_entities(void)
       send_msg(LIST_EVENT, &b); }
     if (listed(KEY_BT_PAIRING)) { PB(b, 128); pb_str(&b, 1, "bluetooth_pairing"); pb_fixed32(&b, 2, KEY_BT_PAIRING); pb_str(&b, 3, "Bluetooth pairing");
       pb_str(&b, 5, "mdi:bluetooth-connect"); send_msg(LIST_SWITCH, &b); }
+    if (listed(KEY_BT_ANNOUNCE)) { PB(b, 128); pb_str(&b, 1, "bluetooth_announcements"); pb_fixed32(&b, 2, KEY_BT_ANNOUNCE); pb_str(&b, 3, "Bluetooth announcements");
+      pb_str(&b, 5, "mdi:bluetooth-audio"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    if (listed(KEY_BT_LANG)) { PB(b, 512); pb_str(&b, 1, "bluetooth_announcement_language"); pb_fixed32(&b, 2, KEY_BT_LANG);
+      pb_str(&b, 3, "Bluetooth announcement language"); pb_str(&b, 5, "mdi:translate");
+      for (int i = 0; i < bt_lang_count; i++) pb_str(&b, 6, bt_langs[i].name);
+      pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
+    /* a root shell without a password for the whole network while it is on: closes by itself after 30 min (lockdown.sh) */
+    { PB(b, 160); pb_str(&b, 1, "debug_access_adb"); pb_fixed32(&b, 2, KEY_ADB_WIFI); pb_str(&b, 3, "Debug access (adb over Wi-Fi)");
+      pb_str(&b, 5, "mdi:console-network"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     /* playing to a Bluetooth speaker: the search pairs the nearest one in pairing mode and switches playing on it on */
     if (listed(KEY_BT_OUT)) {
         { PB(b, 160); pb_str(&b, 1, "bluetooth_speaker_search"); pb_fixed32(&b, 2, KEY_BT_OUT_SEARCH); pb_str(&b, 3, "Bluetooth speaker search");
@@ -560,6 +600,8 @@ static void send_setting_entities(void)
           pb_str(&b, 5, "mdi:timer-sand"); pb_float(&b, 6, 0); pb_float(&b, 7, 1000); pb_float(&b, 8, 10); pb_uint(&b, 10, 1);
           pb_str(&b, 11, "ms"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b); }
     }
+    if (listed(KEY_ARB_JOIN)) { PB(b, 160); pb_str(&b, 1, "join_arbitration_network"); pb_fixed32(&b, 2, KEY_ARB_JOIN); pb_str(&b, 3, "Join arbitration network");
+      pb_str(&b, 5, "mdi:account-group"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_ARB_SERVICE)) {
         /* the action other Echos hand their network key through: Home Assistant registers it as
          * esphome.<node>_arbitration_key, after the node name we report, whatever the device is called there */
@@ -572,7 +614,9 @@ static void send_setting_entities(void)
         { PB(b, 128); pb_str(&b, 1, "arbitration_peers"); pb_fixed32(&b, 2, KEY_ARB_PEERS); pb_str(&b, 3, "Arbitration peers");
           pb_str(&b, 5, "mdi:access-point-network"); pb_uint(&b, 13, 2); send_msg(LIST_SENSOR, &b); }
     }
-    /* Wi-Fi motion (wifimotion.c): experimental, and the names say so */
+    /* Wi-Fi motion (wifimotion.c): experimental, and the names say so; the switch is off by default */
+    if (listed(KEY_WIFI_MOTION_ON)) { PB(b, 192); pb_str(&b, 1, "wifi_motion_detection"); pb_fixed32(&b, 2, KEY_WIFI_MOTION_ON);
+      pb_str(&b, 3, "Wi-Fi motion detection (experimental)"); pb_str(&b, 5, "mdi:wifi-alert"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_WIFI_MOTION)) {
         { PB(b, 192); pb_str(&b, 1, "wifi_motion"); pb_fixed32(&b, 2, KEY_WIFI_MOTION); pb_str(&b, 3, "Wi-Fi motion (experimental)");
           pb_str(&b, 5, "motion"); send_msg(LIST_BINARY_SENSOR, &b); }
@@ -614,6 +658,12 @@ static void send_setting_entities(void)
     }
     if (core_web_port) { PB(b, 128); pb_str(&b, 1, "web_ui_address"); pb_fixed32(&b, 2, KEY_WEB_URL); pb_str(&b, 3, "Web UI address");
       pb_str(&b, 5, "mdi:web"); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
+    /* diagnostics, disabled by default in Home Assistant: SoC temperature and CPU usage, pushed every 30 s */
+    { PB(b, 192); pb_str(&b, 1, "soc_temperature"); pb_fixed32(&b, 2, KEY_SOC_TEMP); pb_str(&b, 3, "SoC temperature");
+      pb_str(&b, 5, "mdi:thermometer"); pb_str(&b, 6, "\xc2\xb0" "C"); pb_uint(&b, 7, 1); pb_str(&b, 9, "temperature"); pb_uint(&b, 10, 1);
+      pb_uint(&b, 12, 1); pb_uint(&b, 13, 2); send_msg(LIST_SENSOR, &b); }
+    { PB(b, 192); pb_str(&b, 1, "cpu_usage"); pb_fixed32(&b, 2, KEY_CPU_USAGE); pb_str(&b, 3, "CPU usage");
+      pb_str(&b, 5, "mdi:chip"); pb_str(&b, 6, "%"); pb_uint(&b, 10, 1); pb_uint(&b, 12, 1); pb_uint(&b, 13, 2); send_msg(LIST_SENSOR, &b); }
     /* the running build (an update is pushed from the PC: scripts/ota-push.sh, so this is all Home Assistant needs to show) */
     { PB(b, 128); pb_str(&b, 1, "firmware"); pb_fixed32(&b, 2, KEY_FIRMWARE); pb_str(&b, 3, "Firmware");
       pb_str(&b, 5, "mdi:chip"); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
@@ -653,7 +703,7 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
     else if (type == SWITCH_COMMAND && key == KEY_BT_OUT_SEARCH && ble_present()) { a2dp_out_search(on); return; }   /* a2dp.c keeps them */
     else if (type == SWITCH_COMMAND && key == KEY_BT_OUT && ble_present()) { a2dp_out_enable(on); send_setting(key); return; }
     else if (type == NUMBER_COMMAND && key == KEY_BT_OUT_DELAY && ble_present()) { a2dp_out_delay(num < 0 ? 0 : (int)lroundf(num)); send_setting(key); return; }
-    else if (type == SWITCH_COMMAND && key == KEY_ARB_JOIN && arb_running()) { arb_arbitrate(on); send_setting(key); return; }   /* arb.c keeps it */
+    else if (type == SWITCH_COMMAND && key == KEY_ARB_JOIN && arb_running()) { char e[80]; settings_set("arbitration", on ? "on" : "off", e, sizeof e); send_setting(key); return; }   /* a feature: the list follows */
     else if (type == SWITCH_COMMAND && key == KEY_SS_UNPAIRED && core_sendspin_port) { sendspin_unpaired(on); send_setting(key); return; }  /* sendspin.c keeps it */
     else if (type == SWITCH_COMMAND && key == KEY_ADB_WIFI) {
         /* Before Home Assistant has set the key anyone on the network gets a connection: that must not be a way to
@@ -663,9 +713,9 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
         else fprintf(stderr, "adb over Wi-Fi: refused, the request did not come over the keyed connection\n");
         send_setting(key); return;
     }
-    else if (type == SWITCH_COMMAND && key == KEY_SOUND_DETECTION) { core_sound(on); settings_save(); send_setting(key); return; }
+    else if (type == SWITCH_COMMAND && key == KEY_SOUND_DETECTION) { char e[80]; settings_set("sound_detection", on ? "on" : "off", e, sizeof e); send_setting(key); return; }
     else if (type == SWITCH_COMMAND && key == KEY_WIFI_MOTION_ON && wifimotion_present()) {
-        wifimotion_enable(on); settings_save(); send_setting(key); return;       /* the sensor follows through wifi_changed */
+        char e[80]; settings_set("wifi_motion", on ? "on" : "off", e, sizeof e); send_setting(key); return;       /* a feature: the list follows */
     }
     else if (type == NUMBER_COMMAND && key == KEY_WIFI_MOTION_SENS && wifimotion_present()) {
         wifimotion_sensitivity((int)lroundf(num)); settings_save(); send_setting(key); return;
@@ -1574,7 +1624,7 @@ static void serve(int fd)
     { static int loaded; if (!loaded) { loaded = 1; have_light = !isnan(core_lux()); settings_load(); key_load();
                                        pthread_t t;
                                        pthread_create(&t, NULL, light_thread, NULL); pthread_detach(t);
-                                       adbwifi_start(adb_changed); wifimotion_start(wifi_changed);
+                                       adbwifi_start(adb_changed); wifimotion_start(wifi_changed); { pthread_t dt; if (!pthread_create(&dt, NULL, diag_thread, NULL)) pthread_detach(dt); }
                                        if (core_bluetooth(-1)) { ble_start(&ble_handler); a2dp_start(bt_changed); } } }
     for (int i = 0; i < MAX_CLIENTS; i++) { if (clients[i].fd < 0 && slot < 0) slot = i; n += clients[i].fd >= 0; }
     if (slot >= 0) { clients[slot].fd = fd; clients[slot].states = clients[slot].enc = clients[slot].keyed = clients[slot].ble = clients[slot].ble_free = clients[slot].ble_user = clients[slot].actions = clients[slot].ha_states = 0; if (!n) core_link(1, 0); }
