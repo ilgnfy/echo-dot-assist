@@ -2336,6 +2336,17 @@ stereo (and 5.1/7.1).  AirPlay (classic) without AirPlay 2 needs neither NQPTP n
 - Licences: shairport-sync's own licence (an MIT-style text, check the file), nqptp GPL-2.0 (*check*; a separate process, so it stays separate), libplist
   LGPL, libsodium ISC, OpenSSL Apache-2.0.  The repository's rule about `third_party` licences applies.
 
+**Results of 2026-10-22 (night)**
+- *Step 1 done on the PC* (Debian 13, x86-64): nqptp 1.2.9 (45 KB) and shairport-sync (`b991d91`, `--with-airplay-2 --with-ssl=openssl --with-avahi --with-pipe --with-metadata`, 709 KB)
+  build, start, and advertise `_airplay._tcp` (features `0x401C4A00,0x5C340`) and `_raop._tcp` on the LAN; nqptp makes `/dev/shm/nqptp`.  Not tried: a sender (needs an iPhone or Mac).
+- **Music Assistant already offers this Echo as an AirPlay target**: the LAN shows `E2B8E48EC398@Echo Dot 3 d13244 | Music Assistant` (`_raop._tcp`, port 7301 on Music Assistant's host,
+  `am=ShairportSync`): Music Assistant's own AirPlay receiver (classic AirPlay, no AirPlay 2), played on the Echo as a Sendspin player.  An iPhone or Mac can AirPlay to the Echo today,
+  through Music Assistant, with no code on the Echo.  What a native receiver would add: AirPlay 2 multi-room sync *with other AirPlay speakers* and no dependency on Music Assistant being up.
+- Build notes for the cross build: `--with-external-mdns` needs an `avahi-publish-service` (a shim of ours could write avahi's service file; the TXT fields change while playing);
+  without `--with-soxr` shairport uses its own interpolation (drop soxr); libgcrypt needs libgpg-error; `uuid` from util-linux; the firmware's FFmpeg is needed for headers of the exact version.
+- Decision pending (the owner): a native receiver is a multi-day cross-build and integration project (about eight libraries, a bionic patch for nqptp's shared memory, firewall
+  rules below 1024, a hassmic backend) whose main benefit Music Assistant already gives.
+
 **Order of work (size: large, roughly the Drop In feature's)**: (1) on the PC (Linux) build shairport-sync with AirPlay 2 and the `pipe` backend,
 play from an iPhone, confirm PCM flows and what NQPTP needs; (2) NDK cross-build of the libraries and both daemons, run by hand on the Echo
 inside a temporary firewall opening; (3) the backend into hassmic's music stream and `MUSIC_AIRPLAY`; (4) firewall, mDNS, settings and entities, SECURITY.md;
