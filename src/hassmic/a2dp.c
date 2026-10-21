@@ -642,7 +642,16 @@ static int seps[8], nseps;
 
 static struct { struct link *l; int state, media, rseid, delay, label, sep; unsigned char cfg[16]; unsigned ncfg; } av;
 
-static const struct a2dp_codec *sep_codec(int seid) { return seid >= 1 && seid <= nseps ? &a2dp_codecs[seps[seid - 1]] : NULL; }
+/* AAC from phones goes into the firmware's FFmpeg 4, a big decoder fed by whatever a phone sends: off by default (the setting
+ * "bluetooth_aac").  Off, its endpoint is left out of Discover and its SEID refused for capabilities and configuration, so
+ * phones use SBC or aptX; a change counts from the phone's next connection. */
+static atomic_int aac_on;
+int a2dp_aac(int set) { if (set >= 0) atomic_store(&aac_on, set != 0); return atomic_load(&aac_on); }
+static const struct a2dp_codec *sep_codec(int seid)
+{
+    const struct a2dp_codec *c = seid >= 1 && seid <= nseps ? &a2dp_codecs[seps[seid - 1]] : NULL;
+    return c && c->type == A2DP_AAC && !atomic_load(&aac_on) ? NULL : c;
+}
 
 static void set_streaming(int on)
 {
@@ -723,11 +732,14 @@ static void av_rx(struct link *l, const unsigned char *p, size_t n)
     int ours = mine && seid == av.sep;                      /* the endpoint this link has configured */
     switch (sig) {
     case AV_DISCOVER:
+        int k = 0;
         for (int i = 0; i < nseps; i++) {                   /* in use: taken by the stream, or by another source */
-            r[2 * i] = (i + 1) << 2 | (av.l && (!mine || av.sep == i + 1) ? 2 : 0);
-            r[2 * i + 1] = 0 << 4 | 1 << 3;                 /* audio, sink */
+            if (!sep_codec(i + 1)) continue;                /* AAC while it is off */
+            r[2 * k] = (i + 1) << 2 | (av.l && (!mine || av.sep == i + 1) ? 2 : 0);
+            r[2 * k + 1] = 0 << 4 | 1 << 3;                 /* audio, sink */
+            k++;
         }
-        av_reply(l, label, sig, 1, r, 2 * nseps);
+        av_reply(l, label, sig, 1, r, 2 * k);
         break;
     case AV_GET_CAP: case AV_GET_ALL_CAP:
         if (!codec) { r[0] = E_BAD_ACP_SEID; av_reply(l, label, sig, 0, r, 1); break; }

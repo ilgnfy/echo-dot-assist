@@ -53,7 +53,7 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 
 /* ---------------------------------------------------------------- the table */
 
-enum id { WAKE_ENGINE, MIC_LEVEL, DENOISE, WAKE_SOUND, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_STOP_ANY, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WAKE_EVENTS, WIFI_MOTION,
+enum id { WAKE_ENGINE, MIC_LEVEL, DENOISE, WAKE_SOUND, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_STOP_ANY, BT_ANNOUNCE, BT_LANG, BT_AAC, BT_SECURE, LED_AUTO, LED_LEVEL, RING_ROT, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WAKE_EVENTS, WIFI_MOTION,
           WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, HTTPS_VERIFY, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET, NSET };
@@ -75,6 +75,9 @@ static const struct setting table[NSET] = {
     [TIMER_RING]  = { "timer_ring", "Timers ring for", "Voice", "s", S_INT, 0, 600, 1, 0 },     /* 0: until stopped */
     [TIMER_STOP_ANY] = { "timer_stop_any", "Any request stops a ringing timer", "Voice", NULL, S_BOOL, 0, 1, 1, 0 },
     [BT_ANNOUNCE] = { "bluetooth_announcements", "Bluetooth announcements", "Bluetooth", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* off by default, both: AAC feeds the firmware's FFmpeg with what a phone sends; secure pairing only turns away sensors that know legacy pairing only */
+    [BT_AAC]      = { "bluetooth_aac", "Bluetooth AAC from phones", "Bluetooth", NULL, S_BOOL, 0, 1, 1, 0 },
+    [BT_SECURE]   = { "bluetooth_secure_pairing", "Bluetooth proxy: secure pairing only", "Bluetooth", NULL, S_BOOL, 0, 1, 1, 0 },
     [BT_LANG]     = { "bluetooth_announcement_language", "Announcement language", "Bluetooth", NULL, S_CHOICE, 0, 0, 1, 0 },
     [LED_AUTO]    = { "led_auto_brightness", "LED auto brightness", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
     [LED_LEVEL]   = { "led_brightness", "LED brightness", "Lights", "%", S_INT, 0, 100, 1, 0 },
@@ -138,7 +141,7 @@ static const struct setting table[NSET] = {
 static int present(enum id i)
 {
     switch (i) {
-    case BT_ANNOUNCE: case BT_LANG: case BT_AUDIO: case BT_SPEAKER: case BT_OUT_DELAY: case BT_OUT_AWAKE: case BT_OUT_STAY: return ble_present();
+    case BT_ANNOUNCE: case BT_LANG: case BT_AAC: case BT_SECURE: case BT_AUDIO: case BT_SPEAKER: case BT_OUT_DELAY: case BT_OUT_AWAKE: case BT_OUT_STAY: return ble_present();
     case SOUND: return sound_model() != SOUND_NONE;               /* the firmware has one on every model so far */
     case LED_AUTO: case LIGHT_SENSOR: return core_lux() == core_lux();      /* a light sensor: not NAN */
     case WIFI_MOTION: case WIFI_SENS: return wifimotion_present();
@@ -194,6 +197,8 @@ int settings_get(const struct setting *s)
     case TIMER_RING: return core_timer_ring(-1);
     case TIMER_STOP_ANY: return core_timer_stop_any(-1);
     case BT_ANNOUNCE: return core_bt_announce(-1);
+    case BT_AAC: return a2dp_aac(-1);
+    case BT_SECURE: return ble_secure_only(-1);
     case BT_LANG: return bt_lang;
     case LED_AUTO: return core_led_auto(-1);
     case LED_LEVEL: return core_led_brightness(-1);
@@ -242,6 +247,8 @@ static void put(enum id i, int v)
     case TIMER_RING: core_timer_ring(v); break;
     case TIMER_STOP_ANY: core_timer_stop_any(v); break;
     case BT_ANNOUNCE: core_bt_announce(v); break;
+    case BT_AAC: a2dp_aac(v); break;
+    case BT_SECURE: ble_secure_only(v); break;
     case BT_LANG: bt_lang = v; break;
     case LED_AUTO: core_led_auto(v); break;
     case LED_LEVEL: core_led_brightness(v); break;              /* a level of its own: auto off, or it moves */

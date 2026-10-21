@@ -34,6 +34,7 @@ struct ble_handler {
     void (*unpaired)(uint64_t addr, int ok, int error);
 };
 
+int  ble_secure_only(int set);          /* "Bluetooth proxy: secure pairing only": 1/0 sets, -1 reads */
 int  ble_present(void);                 /* the radio exists and is ours (not -B; PC build: no) */
 void ble_start(const struct ble_handler *h);    /* controller thread; takes the radio once btmanagerd has stopped.
                                                    Again to set the handler (NULL: none yet) */

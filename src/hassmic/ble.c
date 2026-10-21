@@ -714,6 +714,12 @@ static int adv_upkeep(void)
 
 struct bond { uint64_t addr; unsigned type, sc, keysize, ediv, has_irk; unsigned char ltk[16], rand[8], irk[16]; };
 static struct bond bonds[MAX_BONDS]; static int nbonds;
+/* "Bluetooth proxy: secure pairing only" (off by default: sensors with legacy pairing only keep working).  On, a device without LE Secure
+ * Connections gets Pairing Failed 0x03 (authentication requirements), a legacy bond no longer encrypts a link (its key rests on
+ * a Just Works exchange anyone near could have recorded), and a Security Request does not replace one. */
+static atomic_int secure_only;
+int ble_secure_only(int set) { if (set >= 0) atomic_store(&secure_only, set != 0); return atomic_load(&secure_only); }
+static int bond_usable(const struct bond *b) { return b && (b->sc || !atomic_load(&secure_only)); }
 /* Our P-256 key pair lives in the controller.  The Echo's MediaTek chip gives and takes P-256 values (public keys, the
  * DHKey) most significant octet first, against the spec, which has them least significant first like SMP: seen on the
  * device, its key was only on the curve read that way, and BlueZ refused it as sent.  Converted at the HCI boundary. */
@@ -854,7 +860,7 @@ static void smp_rx(struct conn *c, const unsigned char *p, size_t n)
                                                                Home Assistant's "pair" replaces a bond (encrypted()) */
         struct bond *b = bond_for(c->addr, c->addr_type);
         if (s->state != S_IDLE || c->enc_pending) return;
-        if (b) { if (!c->enc) encrypt_with(c, b->ltk, b->rand, b->ediv); }
+        if (b) { if (bond_usable(b) && !c->enc) encrypt_with(c, b->ltk, b->rand, b->ediv); }
         else smp_start(c);
         return;
     }
@@ -868,6 +874,10 @@ static void smp_rx(struct conn *c, const unsigned char *p, size_t n)
         memcpy(s->pres, p, 7);
         s->sc = have_sc && s->preq[3] & p[3] & 0x08;        /* Secure Connections whenever both can */
         if (have_sc && !s->sc) fprintf(stderr, "bluetooth: %012llx knows only legacy pairing\n", (unsigned long long)c->addr);
+        if (!s->sc && atomic_load(&secure_only)) {
+            fprintf(stderr, "bluetooth: %012llx refused: secure pairing only is on and it does not do LE Secure Connections\n", (unsigned long long)c->addr);
+            smp_fail(c, 0x03); return;                      /* authentication requirements */
+        }
         /* Full-size keys only: 7..15 octets are what KNOB-style attacks negotiate down to, and every device offers 16 */
         s->keysize = p[4];
         if (s->keysize != 16) { smp_fail(c, 0x06); return; }      /* encryption key size */
@@ -1078,7 +1088,7 @@ static void conn_complete(const unsigned char *q, size_t n)
     c->handle = u16(q + 1) & 0x0fff; c->state = C_MTU; c->mtu = ATT_MTU; now(&c->t);
     if (c->cancel) { c->close_now = 1; return; }            /* asked to go away while it came up */
     struct bond *b = bond_for(c->addr, c->addr_type);
-    if (b) encrypt_with(c, b->ltk, b->rand, b->ediv);      /* paired before: encrypted before any GATT request */
+    if (bond_usable(b)) encrypt_with(c, b->ltk, b->rand, b->ediv);      /* paired before: encrypted before any GATT request */
     unsigned char p[3] = { ATT_MTU_REQ }; put16(p + 1, ATT_MTU);
     att_send(c, p, 3);
 }
@@ -1277,7 +1287,7 @@ static int handle_request(struct req *r)
         if (c->smp.state != S_IDLE) break;                  /* under way: its result answers */
         { struct bond *b = bond_for(c->addr, c->addr_type);
           if (b && c->enc) pair_done(c, 1, 0);
-          else if (b) { if (!c->enc_pending) encrypt_with(c, b->ltk, b->rand, b->ediv); }
+          else if (b) { if (bond_usable(b) && !c->enc_pending) encrypt_with(c, b->ltk, b->rand, b->ediv); }
           else smp_start(c); }
         break;
     case R_UNPAIR: {

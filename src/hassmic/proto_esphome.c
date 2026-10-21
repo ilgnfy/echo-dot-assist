@@ -127,7 +127,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_FIRMWARE, KEY_ARB_HANDOFF, KEY_WEB_URL, KEY_IDENTIFY, KEY_RESET,
        KEY_TIMER_RINGING, KEY_TIMER_NAMES, KEY_DROPIN_SERVICE, KEY_DROPIN_STATE, KEY_DROPIN_PEER, KEY_DROPIN_END, KEY_RESTART,
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
-       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS };
+       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_BT_AAC, KEY_BT_SECURE };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -373,6 +373,8 @@ static void send_setting(int key)       /* lock held */
     case KEY_WAKE_SOUND: pb_uint(&b, 2, core_wake_sound(-1)); send_state(SWITCH_STATE, &b); break;
     case KEY_BT_PAIRING: if (ble_present()) { pb_uint(&b, 2, a2dp_pairing()); send_state(SWITCH_STATE, &b); } break;
     case KEY_BT_ANNOUNCE: if (ble_present()) { pb_uint(&b, 2, core_bt_announce(-1)); send_state(SWITCH_STATE, &b); } break;
+    case KEY_BT_AAC: if (ble_present()) { pb_uint(&b, 2, a2dp_aac(-1)); send_state(SWITCH_STATE, &b); } break;
+    case KEY_BT_SECURE: if (ble_present()) { pb_uint(&b, 2, ble_secure_only(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_DND:   pb_uint(&b, 2, core_dnd(-1)); send_state(SWITCH_STATE, &b); break;
     case KEY_DENOISE: pb_str(&b, 2, denoise_names[core_mic_denoise(-1)]); send_state(SELECT_STATE, &b); break;
     case KEY_BT_LANG: if (ble_present()) { pb_str(&b, 2, settings_bt_lang()->name); send_state(SELECT_STATE, &b); } break;
@@ -560,7 +562,7 @@ static void send_light_entities(void)
 static int listed(int key)
 {
     switch (key) {
-    case KEY_BT_ANNOUNCE: case KEY_BT_LANG: return ble_present();
+    case KEY_BT_ANNOUNCE: case KEY_BT_LANG: case KEY_BT_AAC: case KEY_BT_SECURE: return ble_present();
     case KEY_ARB_JOIN: return arb_running();                      /* the switch that joins the rounds: always, the peers follow when on */
     case KEY_WIFI_MOTION_ON: return wifimotion_present();
     case KEY_SENDSPIN_TOKEN: case KEY_SS_UNPAIRED: return core_sendspin_port != 0;
@@ -630,6 +632,10 @@ static void send_setting_entities(void)
       pb_str(&b, 5, "mdi:bluetooth-connect"); send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_BT_ANNOUNCE)) { PB(b, 128); pb_str(&b, 1, "bluetooth_announcements"); pb_fixed32(&b, 2, KEY_BT_ANNOUNCE); pb_str(&b, 3, "Bluetooth phones: announcements");
       pb_str(&b, 5, "mdi:bluetooth-audio"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    if (listed(KEY_BT_AAC)) { PB(b, 160); pb_str(&b, 1, "bluetooth_aac"); pb_fixed32(&b, 2, KEY_BT_AAC); pb_str(&b, 3, "Bluetooth phones: AAC");
+      pb_str(&b, 5, "mdi:music-note"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    if (listed(KEY_BT_SECURE)) { PB(b, 192); pb_str(&b, 1, "bluetooth_secure_pairing"); pb_fixed32(&b, 2, KEY_BT_SECURE);
+      pb_str(&b, 3, "Bluetooth proxy: secure pairing only"); pb_str(&b, 5, "mdi:shield-lock"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_BT_LANG)) { PB(b, 512); pb_str(&b, 1, "bluetooth_announcement_language"); pb_fixed32(&b, 2, KEY_BT_LANG);
       pb_str(&b, 3, "Bluetooth phones: announcement language"); pb_str(&b, 5, "mdi:translate");
       for (int i = 0; i < bt_lang_count; i++) pb_str(&b, 6, bt_langs[i].name);
@@ -748,6 +754,14 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
     else if (type == SWITCH_COMMAND && key == KEY_MUTE) { core_soft_mute(on); settings_save(); send_setting(KEY_MUTE); return; }
     else if (type == SWITCH_COMMAND && key == KEY_WAKE_SOUND) core_wake_sound(on);
     else if (type == SWITCH_COMMAND && key == KEY_BT_ANNOUNCE) core_bt_announce(on);
+    else if (type == SWITCH_COMMAND && (key == KEY_BT_AAC || key == KEY_BT_SECURE) && ble_present()) {
+        /* the weaker way (AAC on: the firmware's decoder takes what phones send; secure pairing only off: legacy pairing again)
+         * only over the keyed connection: before Home Assistant has set the key anyone on the network could connect and flip it */
+        int c = client_of(reply_fd), weaker = key == KEY_BT_AAC ? on : !on;
+        if (!weaker || (c >= 0 && clients[c].keyed)) { char e[80]; settings_set(key == KEY_BT_AAC ? "bluetooth_aac" : "bluetooth_secure_pairing", on ? "on" : "off", e, sizeof e); }
+        else fprintf(stderr, "bluetooth: %s refused, the request did not come over the keyed connection\n", key == KEY_BT_AAC ? "AAC on" : "secure pairing off");
+        send_setting(key); return;
+    }
     else if (type == SWITCH_COMMAND && key == KEY_DND) core_dnd(on);
     else if (type == SWITCH_COMMAND && key == KEY_BT_PAIRING) { a2dp_pair(on); return; }     /* its state follows through bt_changed */
     else if (type == SWITCH_COMMAND && key == KEY_BT_OUT_SEARCH && ble_present()) { a2dp_out_search(on); return; }   /* a2dp.c keeps them */
@@ -1491,7 +1505,7 @@ static void on_va_set_config(const unsigned char *p, const unsigned char *end)
 static void send_all_settings(void)
 {
     send_setting(KEY_MIC_LEVEL); send_setting(KEY_DENOISE); send_setting(KEY_MUTE); send_setting(KEY_WAKE_SOUND); send_setting(KEY_BT_PAIRING); send_setting(KEY_BT_ANNOUNCE); send_setting(KEY_DND); send_setting(KEY_SOUND_DETECTION);
-        send_setting(KEY_BT_LANG);
+        send_setting(KEY_BT_LANG); send_setting(KEY_BT_AAC); send_setting(KEY_BT_SECURE);
         for (int k = KEY_EQ_BASS; k <= KEY_EQ_TREBLE; k++) send_setting(k);
         for (int k = KEY_ARB_JOIN; k <= KEY_ARB_PEERS; k++) send_setting(k);
         send_setting(KEY_SS_UNPAIRED); send_setting(KEY_ADB_WIFI);

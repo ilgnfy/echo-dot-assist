@@ -9,6 +9,7 @@ void a2dp_start(void (*changed)(void));    /* takes the radio (ble.c's thread) i
                                               changed, called on the controller thread without locks.  Call again to set it */
 void a2dp_pair(int on);                    /* any thread: discoverable and pairable for A2DP_PAIR_SECONDS, or stop */
 int  a2dp_pairing(void);                   /* 1 while pairable */
+int  a2dp_aac(int set);                    /* Bluetooth AAC from phones (off by default): 1/0 sets, -1 reads; counts from the phone's next connection */
 /* any thread */
 void a2dp_volume_changed(int percent);     /* the Echo's volume moved: tell the device (AVRCP absolute volume) */
 void a2dp_speaker_volume(int percent);     /* lock held: what the speaker we play to is set to while it has absolute
