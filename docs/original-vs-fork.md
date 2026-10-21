@@ -12,8 +12,7 @@ which is why entities were gone. This page says what each side has so nothing is
 
 Hardening of the root side (`main.sh`, `tests/boot_test.sh`), Sendspin, Bluetooth and network limits, adb for the signer's address only, the switches "Bluetooth phones: AAC" and
 "Bluetooth proxy: secure pairing only" (written again for the fork's code).  See CHANGELOG.  Not taken: the arbitration candidate limits, core locking and liveness
-(`335f41a`, 500 lines of `main.c`), the client write queue (`6bd155d`), Improv hardening (the fork has its own `improv.c`), the module split.  Still to port:
-the alarm clock and the task manager.
+(`335f41a`, 500 lines of `main.c`), the client write queue (`6bd155d`), Improv hardening (the fork has its own `improv.c`), the module split.  The alarm clock and the task manager were ported too (the same night).
 
 ## Only in the original (what the fork lacks)
 

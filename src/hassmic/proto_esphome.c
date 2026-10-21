@@ -84,6 +84,8 @@
 #include "https.h"
 #include "noise.h"
 #include "sendspin.h"
+#include "taskmgr.h"
+#include "threadname.h"
 #include "clock.h"
 #include "wifimotion.h"
 #include "net.h"
@@ -130,7 +132,8 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
        KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_BT_AAC, KEY_BT_SECURE,
        KEY_ALARM_ON, KEY_ALARM_TIME = KEY_ALARM_ON + ALARM_SLOTS, KEY_ALARM_REPEAT = KEY_ALARM_TIME + ALARM_SLOTS,
-       KEY_ALARM_STOP = KEY_ALARM_REPEAT + ALARM_SLOTS, KEY_ALARM_SNOOZE, KEY_ALARM_RINGING, KEY_ALARM_EVENT, KEY_ALARM_NEXT };
+       KEY_ALARM_STOP = KEY_ALARM_REPEAT + ALARM_SLOTS, KEY_ALARM_SNOOZE, KEY_ALARM_RINGING, KEY_ALARM_EVENT, KEY_ALARM_NEXT,
+       KEY_MEM_USED, KEY_MEM_AVAIL, KEY_LOAD, KEY_SELF_CPU, KEY_SELF_RSS, KEY_TOP, KEY_THREADS, KEY_LAST_KILL, KEY_KILL_SERVICE };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -463,17 +466,71 @@ static void send_sensor(int key, float v)   /* lock held */
 }
 
 /* SoC temperature and CPU usage (diag.c): pushed every 30 s to whoever subscribed to states */
+/* Task manager (taskmgr.h): sampled by diag_thread outside the lock, published here */
+#define DIAG_TICK_S 10          /* the task manager; temperature and CPU usage every third tick, the time every 360th */
+static struct taskmgr_stats tm;         /* lock held: the last sample */
+static int tm_have;                     /* lock held */
+
+static void send_text(int key, const char *v)      /* lock held.  "": unknown */
+{
+    PB(b, TASKMGR_TEXT + 16);
+    pb_fixed32(&b, 1, key);
+    if (*v) pb_str(&b, 2, v); else pb_uint(&b, 3, 1);
+    send_state(TEXT_SENSOR_STATE, &b);
+}
+
+static void send_last_kill(void) { char k[TASKMGR_TEXT]; taskmgr_last_kill(k, sizeof k); send_text(KEY_LAST_KILL, k); }   /* lock held */
+
+static void send_task_states(void)      /* lock held */
+{
+    send_last_kill();
+    if (!tm_have) return;
+    send_sensor(KEY_MEM_USED, tm.mem_used_pct); send_sensor(KEY_MEM_AVAIL, tm.mem_avail_mb); send_sensor(KEY_SELF_RSS, tm.self_rss_mb);
+    if (tm.load1 >= 0) send_sensor(KEY_LOAD, tm.load1);
+    if (!tm.cpu) return;                /* the first sample has nothing to take differences to */
+    send_sensor(KEY_SELF_CPU, tm.self_cpu_pct); send_text(KEY_TOP, tm.top); send_text(KEY_THREADS, tm.threads);
+}
+
+static void kill_changed(void) { pthread_mutex_lock(&core_lock); send_last_kill(); pthread_mutex_unlock(&core_lock); }
+
+/* lock held: the "kill_process" action.  Root does it (taskmgr.h) and decides what may go; a request at all only from
+ * Home Assistant with the key: before it is set anyone on the network gets a connection */
+static void on_kill(int keyed, int pid, const char *sig)
+{
+    char why[160];
+    if (!keyed) { fprintf(stderr, "kill: refused, the request did not come over the keyed connection\n"); return; }
+    if (taskmgr_kill(pid, sig, why, sizeof why)) fprintf(stderr, "kill: %d refused: %s\n", pid, why);
+    send_last_kill();
+}
+
+
+static int any_subscriber(void)         /* lock held */
+{
+    int any = 0;
+    for (int i = 0; i < MAX_CLIENTS; i++) any |= clients[i].fd >= 0 && clients[i].states;
+    return any;
+}
+
+/* SoC temperature and CPU usage (diag.c) every third tick, the task manager's figures every tick */
 static void *diag_thread(void *arg)
 {
+    static int said;
+    thread_name("diag");
     (void)arg;
-    for (;;) {
-        float t = diag_soc_temp(), c = diag_cpu();            /* the CPU figure blocks 250 ms: outside the lock */
+    for (int n = 1;; n++) {
+        struct taskmgr_stats s; int got = 0; float t = NAN, c = NAN;
+        sleep(DIAG_TICK_S);
+        pthread_mutex_lock(&core_lock); int any = any_subscriber(); pthread_mutex_unlock(&core_lock);
+        /* only for someone to see it; outside the lock, it reads all of /proc */
+        if (any && !(got = !taskmgr_sample(&s)) && !said++) fprintf(stderr, "task manager: cannot read /proc/stat or /proc/meminfo\n");
+        if (got && !said++)             /* what watching costs, once; from then on the diag thread's share in "hassmic threads" */
+            fprintf(stderr, "task manager: a sample of %d processes (%d unreadable) and %d threads takes %.1f ms, %.1f ms of it CPU\n",
+                    s.nproc, s.unreadable, s.nthreads, s.cost_ms, s.cost_cpu_ms);
+        if (any && n % 3 == 0) { t = diag_soc_temp(); c = diag_cpu(); }          /* the CPU figure blocks 250 ms: outside the lock */
         pthread_mutex_lock(&core_lock);
-        int any = 0;
-        for (int i = 0; i < MAX_CLIENTS; i++) any |= clients[i].fd >= 0 && clients[i].states;
-        if (any) { send_sensor(KEY_SOC_TEMP, t); send_sensor(KEY_CPU_USAGE, c); }
+        if (got) { tm = s; tm_have = 1; send_task_states(); }
+        if (n % 3 == 0 && any_subscriber()) { send_sensor(KEY_SOC_TEMP, t); send_sensor(KEY_CPU_USAGE, c); }
         pthread_mutex_unlock(&core_lock);
-        sleep(30);
     }
     return NULL;
 }
@@ -663,8 +720,41 @@ static int on_alarm_command(unsigned type, unsigned key, int on, const char *opt
         }
         alarms_set(i, &a);
     } else return 0;
-    send_alarm_states();
+    send_alarm_states(); send_task_states();
     return 1;
+}
+
+static void task_sensor(const char *id, int key, const char *name, const char *icon, const char *unit, int decimals, int disabled)
+{
+    PB(b, 192);
+    pb_str(&b, 1, id); pb_fixed32(&b, 2, key); pb_str(&b, 3, name); pb_str(&b, 5, icon); pb_str(&b, 6, unit);
+    pb_uint(&b, 7, decimals); pb_uint(&b, 10, 1); pb_uint(&b, 12, disabled); pb_uint(&b, 13, 2);
+    send_msg(LIST_SENSOR, &b);
+}
+
+static void task_text(const char *id, int key, const char *name, const char *icon, int disabled)
+{
+    PB(b, 160);
+    pb_str(&b, 1, id); pb_fixed32(&b, 2, key); pb_str(&b, 3, name); pb_str(&b, 5, icon); pb_uint(&b, 6, disabled); pb_uint(&b, 7, 2);
+    send_msg(LIST_TEXT_SENSOR, &b);
+}
+
+static void send_task_entities(void)
+{
+    task_sensor("memory_used", KEY_MEM_USED, "Memory used", "mdi:memory", "%", 1, 0);
+    task_sensor("memory_available", KEY_MEM_AVAIL, "Memory available", "mdi:memory", "MB", 0, 1);
+    task_sensor("load_average", KEY_LOAD, "Load average", "mdi:gauge", "", 2, 1);
+    task_sensor("hassmic_cpu", KEY_SELF_CPU, "hassmic CPU", "mdi:chip", "%", 1, 1);
+    task_sensor("hassmic_memory", KEY_SELF_RSS, "hassmic memory", "mdi:memory", "MB", 1, 1);
+    task_text("top_processes", KEY_TOP, "Top processes", "mdi:format-list-numbered", 1);
+    task_text("hassmic_threads", KEY_THREADS, "hassmic threads", "mdi:format-list-bulleted", 1);
+    task_text("last_kill", KEY_LAST_KILL, "Last kill", "mdi:close-octagon-outline", 0);
+    /* Home Assistant names it esphome.<node>_kill_process and makes every argument required: "signal" may be empty */
+    { PB(b, 256); PB(a, 48); pb_str(&b, 1, "kill_process"); pb_fixed32(&b, 2, KEY_KILL_SERVICE);
+      pb_str(&a, 1, "pid"); pb_uint(&a, 2, 1); pb_bytes(&b, 3, a.p, a.n);
+      a.n = 0; pb_str(&a, 1, "signal"); pb_uint(&a, 2, 3); pb_bytes(&b, 3, a.p, a.n);
+      pb_str(&b, 5, "Ends a process: signal term (or empty) or kill; root refuses what keeps the Echo running or locked down");
+      send_msg(LIST_SERVICE, &b); }
 }
 
 static void send_setting_entities(void)
@@ -795,6 +885,7 @@ static void send_setting_entities(void)
     if (core_web_port) { PB(b, 128); pb_str(&b, 1, "web_ui_address"); pb_fixed32(&b, 2, KEY_WEB_URL); pb_str(&b, 3, "Web UI address");
       pb_str(&b, 5, "mdi:web"); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
     send_alarm_entities();
+    send_task_entities();
     /* diagnostics, disabled by default in Home Assistant: SoC temperature and CPU usage, pushed every 30 s */
     { PB(b, 192); pb_str(&b, 1, "soc_temperature"); pb_fixed32(&b, 2, KEY_SOC_TEMP); pb_str(&b, 3, "SoC temperature");
       pb_str(&b, 5, "mdi:thermometer"); pb_str(&b, 6, "\xc2\xb0" "C"); pb_uint(&b, 7, 1); pb_str(&b, 9, "temperature"); pb_uint(&b, 10, 1);
@@ -1705,6 +1796,7 @@ static int handle(unsigned type, const unsigned char *p, size_t len)
             }
         }
         if (key == KEY_RING_LEDS && listed(KEY_RING_LEDS)) { ring_leds_from(colors, nc); break; }
+        if (key == KEY_KILL_SERVICE) { on_kill(c >= 0 && clients[c].keyed, atoi(args[0]), args[1]); break; }
         /* Drop In from Home Assistant (an automation, the voice blueprint): it may open another Echo's microphone, so
          * only over the keyed link too */
         if (key == KEY_DROPIN_SERVICE && listed(KEY_DROPIN_SERVICE)) {
@@ -1872,7 +1964,7 @@ static void serve(int fd)
     { static int loaded; if (!loaded) { loaded = 1; have_light = !isnan(core_lux()); settings_load(); key_load();
                                        pthread_t t;
                                        pthread_create(&t, NULL, light_thread, NULL); pthread_detach(t);
-                                       adbwifi_start(adb_changed); wifimotion_start(wifi_changed); { pthread_t dt; if (!pthread_create(&dt, NULL, diag_thread, NULL)) pthread_detach(dt); }
+                                       adbwifi_start(adb_changed); wifimotion_start(wifi_changed); taskmgr_start(kill_changed); { pthread_t dt; if (!pthread_create(&dt, NULL, diag_thread, NULL)) pthread_detach(dt); }
                                        if (core_bluetooth(-1)) { ble_start(&ble_handler); a2dp_start(bt_changed); } } }
     slot = take_slot(fd, &n);
     int keyed = have_key;

@@ -411,6 +411,10 @@ While a phone plays, the proxy stops scanning: the radio cannot do both without 
 | Stop ringing | button: ends a ringing timer and nothing else |
 | Button | event: each press and 1 s hold of the action and volume buttons, see [Buttons and light ring](#buttons-and-light-ring) |
 | Light ring | light: colour, brightness, effects; the Echo's own lights first, see [Buttons and light ring](#buttons-and-light-ring) |
+| Alarm 1 to 3 (switch), their time and repeat (once, every day, weekdays, weekends, one weekday) | an alarm clock on the Echo: the alarms live on the Echo and ring without Home Assistant; the wall clock is Home Assistant's, taken over the encrypted connection and kept as an offset to the boot clock (no alarm rings before the Echo has had it since the boot) |
+| Alarm ringing, Next alarm, Stop alarm, Snooze alarm, Alarm (event: which alarm rang) | a ringing alarm sounds like a finished timer: same ring, same stop (button, "stop", Home Assistant), at the timers' volume; snooze 9 minutes |
+| Memory used, Memory available, Load average, hassmic CPU, hassmic memory, Top processes, hassmic threads, Last kill | the task manager, every 10 s while Home Assistant is connected (all but Memory used and Last kill disabled by default); `scripts/top.sh` shows the same live over adb |
+| Action `kill_process` (pid, signal) | ends a process: only over the encrypted connection; root carries it out and refuses init, the kernel, the boot and firewall scripts, the mixer, Wi-Fi and DHCP |
 | Firmware | diagnostic text: the running version; updates are pushed from your PC, see [Updating](../README.md#updating) |
 | Identify, Restart, Factory reset | buttons; Restart reboots the Echo |
 | Web UI address | diagnostic: the settings page's address |

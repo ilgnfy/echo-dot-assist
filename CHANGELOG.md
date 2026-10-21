@@ -4,6 +4,11 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-22
 
+- **An alarm clock on the Echo and a task manager**, from the original project: three alarms (time, once or repeating) that you set in Home Assistant and that ring on the
+  Echo itself, also while Home Assistant or the network is down (the time of day comes from Home Assistant after each start; none rings before). They ring like a finished timer
+  and stop the same ways; "Snooze alarm" and "Next alarm" are there too. The task manager shows memory, load, the busiest processes and hassmic's own threads as sensors and
+  lets Home Assistant end a process (`kill_process`, over the encrypted connection only; root refuses what keeps the Echo running); `scripts/top.sh` shows it over adb.
+
 - **Safer, from the original project**: the boot and update scripts no longer write through names the daemon could have turned into links; an update counts as
   good only after its self test; broken or CR LF bundles and configs are refused; Bluetooth, Sendspin, the ESPHome port and the push port have limits against
   hostile peers; adb over Wi-Fi opened with your update key is open for **your PC's address only**. New switches in Home Assistant (both off): "Bluetooth phones: AAC" (iPhones use

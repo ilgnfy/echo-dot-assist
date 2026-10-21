@@ -305,9 +305,99 @@ factory() {
 # file (result.tmp -> /data/local/hassmic/hassmic, and root would create and chown that for it, then run it).  So the
 # result is written in root's own directory and renamed into place; a rename replaces a link, it does not follow it.
 RES=$OTA/result.tmp
+answer() {
+    echo "$2" > $BASE/$1.tmp
+    chown $DAEMON_USER $BASE/$1.tmp; chmod 644 $BASE/$1.tmp
+    rm -rf $BASE/state/$1                   # a link to a directory there would take the rename into it
+    mv -f $BASE/$1.tmp $BASE/state/$1
+}
+# Root side of the task manager's kill (hassmic's taskmgr.c: the action "kill_process" in Home Assistant, which hassmic
+# takes only over the connection with the key).  hassmic may not signal another user's process, so it leaves
+# state/kill-request (0600): "<pid> <start time> TERM|KILL", the start time being field 22 of /proc/<pid>/stat as it read
+# it: a process that ended meanwhile cannot take whatever got its number with it.  Taken into root's own directory as the
+# Wi-Fi requests are, checked as numbers, and only signalled if it neither keeps the Echo running and reachable nor is part
+# of what keeps the egress lock: not init and the core daemons (KILL_KEEP), no kernel thread, not these scripts (this
+# service, lockdown.sh watch) nor anything they run (their sleeps: one killed ends its loop), not wpa_supplicant or dhcpcd
+# (the way to the Echo), not the mixer (hassmic's audio front end; not seen to come back on its own).  Amazon's other
+# daemons may go, and hassmic itself: the satellite service starts it again.  TERM, KILL after 3 s if it is still there.
+KREQ=$BASE/state/kill-request
+KILL_KEEP="init ueventd logd servicemanager hwservicemanager vndservicemanager vold netd adbd zygote main surfaceflinger
+           watchdogd lmkd healthd kthreadd wpa_supplicant dhcpcd mixer iptables ip6tables iptables-restore ip6tables-restore"
+# kstat PID: kcomm, kstate, kppid, kstart of it; fails when it is gone.  The name may hold spaces and ")": the fields
+# start after the last ") ".  read, not a tool: no process per look.
+kstat() {
+    _s=; { IFS= read -r _s < /proc/$1/stat; } 2>/dev/null; [ -n "$_s" ] || return 1
+    kcomm=${_s#*\(}; kcomm=${kcomm%\)*}
+    set -- ${_s##*") "}
+    kstate=$1 kppid=$2 kstart=${20}
+    [ -n "$kstart" ]
+}
+# kcmd PID: its command line in kcmdline, arguments after a space each; empty for a kernel thread
+kcmd() {
+    kcmdline=
+    # read -d is mksh's (and bash's), not POSIX: the Echo's shell has it
+    # shellcheck disable=SC3045
+    while IFS= read -r -d '' _a; do kcmdline="$kcmdline $_a"; done 2>/dev/null < /proc/$1/cmdline
+}
+scripted() { case "$kcmdline" in *main.sh*|*boot.sh*|*lockdown.sh*|*sysinstall.sh*|*wifi-join.sh*) return 0;; esac; return 1; }
+kalive() { kstat $1 && [ "$kstart" = "$2" ] && [ "$kstate" != Z ]; }    # PID START: that process, not a zombie of it
+# why PID (just looked at with kstat) must not be killed; nothing if it may
+kill_bad() {
+    [ $1 -gt 2 ] || { echo "pid $1 is init or the kernel's"; return; }
+    [ "$kppid" != 2 ] || { echo "$1 is a kernel thread"; return; }
+    kcmd $1; [ -n "$kcmdline" ] || { echo "$1 has no command line (a kernel thread, or ending)"; return; }
+    _a0=${kcmdline# }; _a0=${_a0%% *}; _a0=${_a0##*/}
+    for _k in $KILL_KEEP; do
+        if [ "$kcomm" = "$_k" ] || [ "$_a0" = "$_k" ]; then echo "$1 is $_k, which the Echo needs"; return; fi
+    done
+    scripted && { echo "$1 is one of the boot and firewall scripts"; return; }
+    case "$(readlink /proc/$1/exe)" in */hassmic) return;; esac     # the satellite service's loop starts it again
+    kcmd $kppid
+    scripted && echo "$1 runs for the boot and firewall scripts"
+}
+kill_watch() {
+    [ -e $KREQ ] || [ -L $KREQ ] || return 0
+    t=$BASE/kill-request.taken
+    rm -rf $t; mv -f $KREQ $t 2>/dev/null || return 0
+    why=; req=
+    if [ -L $t ] || [ ! -f $t ]; then why="not a plain file"
+    else req=$(head -c 65 $t); [ ${#req} -le 64 ] || why="too long"
+    fi
+    rm -rf $t
+    set -f; set -- $req; set +f
+    if [ -n "$why" ]; then :
+    elif [ $# != 3 ]; then why="not three fields"
+    else
+        case "$1" in ''|0*|*[!0-9]*) why="pid not a number";; esac
+        case "$2" in ''|*[!0-9]*) why="start time not a number";; esac
+        case "$3" in TERM|KILL) ;; *) why="signal neither TERM nor KILL";; esac
+        { [ ${#1} -le 7 ] && [ ${#2} -le 20 ]; } || why="number too long"
+    fi
+    pid=$1 start=$2 sig=$3
+    if [ -z "$why" ]; then
+        if ! kstat $pid; then why="no process $pid"
+        elif [ "$kstart" != "$start" ]; then why="$pid is not the process asked for any more (it ended, the number is reused)"
+        else why=$(kill_bad $pid)
+        fi
+    fi
+    if [ -n "$why" ]; then res="FAILED refused: $why"
+    else
+        name="$(printf %s "$kcomm" | tr -cd ' -~') ($pid)"     # what it calls itself, on one line: log, Home Assistant
+        kill -$sig $pid 2>/dev/null
+        i=0; while [ $i -lt 3 ] && kalive $pid $start; do sleep 1; i=$((i + 1)); done
+        if ! kalive $pid $start; then res="OK $name ended on $sig"
+        elif [ $sig = TERM ] && kill -KILL $pid 2>/dev/null && sleep 1 && ! kalive $pid $start; then
+            res="OK $name ended on KILL, TERM was ignored for 3 s"
+        else res="FAILED $name still runs after $sig"
+        fi
+    fi
+    echo "== kill: $res"
+    answer kill-result "$res"
+}
 ota_watch() {
     IN=$BASE/state/ota
     while sleep 2; do
+        kill_watch
         if [ -f $IN/healthy ]; then
             rm -f $IN/healthy
             cur=$(readlink $OTA/current)

@@ -139,4 +139,22 @@ else
     kill -- -$MAIN 2>/dev/null; wait $MAIN 2>/dev/null; MAIN=
 fi
 
+# 7. The task manager's kill (kill_watch): a process asked for by pid and start time is ended; init, a wrong start time, and a plain-text request are refused
+echo 'NAME="Test"' > $BASE/hassmic.conf
+printf 'PRODUCT=testdev\nDAEMON_USER=nobody\n' > $D/device.conf
+run firewall
+sleep 100 & VP=$!
+vstart=$(sed 's/.*) //' /proc/$VP/stat | cut -d' ' -f20)
+printf '%s %s TERM\n' $VP $vstart > $BASE/state/kill-request
+waitfor "[ -f $BASE/state/kill-result ]" 60; read -r kres < $BASE/state/kill-result 2>/dev/null
+! kill -0 $VP 2>/dev/null && case "$kres" in OK*) true;; *) false;; esac; ok $? "kill request: the process ended ($kres)"
+rm -f $BASE/state/kill-result; printf '1 1 KILL\n' > $BASE/state/kill-request
+waitfor "[ -f $BASE/state/kill-result ]" 60; read -r kres < $BASE/state/kill-result 2>/dev/null
+case "$kres" in "FAILED refused"*) true;; *) false;; esac; ok $? "init is refused ($kres)"
+sleep 100 & VP=$!; rm -f $BASE/state/kill-result
+printf '%s 1 TERM\n' $VP > $BASE/state/kill-request
+waitfor "[ -f $BASE/state/kill-result ]" 60; read -r kres < $BASE/state/kill-result 2>/dev/null
+kill -0 $VP 2>/dev/null && case "$kres" in "FAILED refused"*) true;; *) false;; esac; ok $? "a pid with another start time is not the process asked for ($kres)"
+kill $VP 2>/dev/null; stop_main
+
 [ $fail = 0 ] && echo "all good" || { echo FAILED; cat $BASE/boot.log; exit 1; }

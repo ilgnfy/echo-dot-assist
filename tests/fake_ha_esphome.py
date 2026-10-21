@@ -75,8 +75,8 @@ async def main(e):
     check("arbitration_id" not in by and isinstance(by.get("join_arbitration_network"), SwitchInfo) and pv("arbitration") == 1 and isinstance(apeers, SensorInfo),
           "arbitration on by default, the join switch and the peers sensor, no ID entity")
     svcs = (await cli.list_entities_services())[1]
-    check(sorted((v.name, [(x.name, int(x.type)) for x in v.args]) for v in svcs) == [("arbitration_key", [("network", 3), ("key", 3)]), ("drop_in", [("target", 3)])],
-          "actions \"arbitration_key\" (network, key: strings) for other Echos to hand over their network, \"drop_in\" (target: string)")
+    check(sorted((v.name, [(x.name, int(x.type)) for x in v.args]) for v in svcs) == [("arbitration_key", [("network", 3), ("key", 3)]), ("drop_in", [("target", 3)]), ("kill_process", [("pid", 1), ("signal", 3)])],
+          "actions \"arbitration_key\" (network, key: strings) for other Echos to hand over their network, \"drop_in\" (target: string), \"kill_process\" (pid: int, signal: string)")
     check(conf().get("noise_reduction") == "off" and conf().get("mic_level") == "-20", f"settings persisted: {conf()}")
     cfg = await cli.get_voice_assistant_configuration(5)
     avail = sorted((w.id, w.wake_word, list(w.trained_languages)) for w in cfg.available_wake_words)
