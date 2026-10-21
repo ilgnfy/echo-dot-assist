@@ -166,6 +166,34 @@ async def main(e):
     try: tz = open(os.path.join(state, "timezone")).read()
     except OSError: tz = ""
     check(tz == iana_to_posix_tz("Europe/Berlin") + "\n", f"keyed link: Home Assistant's time zone in state/timezone for root: {tz!r}")
+    # The alarm clock (alarms.c): three alarms set from Home Assistant, kept on the Echo; its time comes over the keyed link (just now)
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from aioesphomeapi import SwitchState, SelectState, EventInfo
+    from aioesphomeapi.model import Event
+    ast = []; enc.subscribe_states(ast.append)
+    alast = lambda k, t: ([x.state for x in ast if isinstance(x, t) and x.key == k] or [None])[-1]
+    ents = {e.object_id: e for e in (await enc.list_entities_services())[0]}
+    need = ["alarm_1", "alarm_1_time", "alarm_1_repeat", "alarm_2", "alarm_3_time", "stop_alarm", "snooze_alarm", "alarm_ringing", "alarm", "next_alarm"]
+    check(all(k in ents for k in need) and isinstance(ents["alarm"], EventInfo) and list(ents["alarm"].event_types) == ["alarm_1", "alarm_2", "alarm_3"]
+          and list(ents["alarm_1_repeat"].options)[:3] == ["Once", "Every day", "Weekdays"], f"alarm clock entities listed: {[k for k in need if k not in ents]} missing")
+    a1, a1t, a1r, rg = ents["alarm_1"], ents["alarm_1_time"], ents["alarm_1_repeat"], ents["alarm_ringing"]
+    when = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(seconds=5)
+    enc.time_command(a1t.key, when.hour, when.minute, when.second)
+    enc.select_command(a1r.key, "Once"); enc.switch_command(a1.key, True)
+    want = when.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S")
+    nxt = lambda: [x.state for x in ast if isinstance(x, TextSensorState) and x.key == ents["next_alarm"].key and not x.missing_state][-1:]
+    await until(lambda: alast(a1.key, SwitchState) is True and nxt() and nxt()[0].startswith(want), 5)
+    check(alast(a1.key, SwitchState) is True and nxt() and nxt()[0].startswith(want), f"alarm 1 on, its time kept, 'Next alarm' says when: {nxt()} for {want}")
+    await until(lambda: alast(rg.key, BinarySensorState) is True, 12)
+    evs = [x.event_type for x in ast if isinstance(x, Event) and x.key == ents["alarm"].key]
+    check(alast(rg.key, BinarySensorState) is True and evs == ["alarm_1"] and alast(a1.key, SwitchState) is False,
+          f"the alarm rings on time, 'Alarm' names alarm_1, a once-alarm switches itself off: ringing {alast(rg.key, BinarySensorState)} {evs}")
+    enc.button_command(ents["stop_alarm"].key)
+    await until(lambda: alast(rg.key, BinarySensorState) is False, 5)
+    check(alast(rg.key, BinarySensorState) is False, "Stop alarm ends the ring")
+    check(re.search(r"alarm clock: time from Home Assistant: .*time zone CET", open(env["HASSMIC_LOG"]).read()) is not None if "HASSMIC_LOG" in env else True,
+          "the alarm clock took Home Assistant's time and zone")
     started.clear(); mic.clear()
     enc.subscribe_voice_assistant(handle_start=handle_start, handle_stop=handle_stop, handle_audio=handle_audio, handle_announcement_finished=handle_finished)
     await sync(enc); proc.send_signal(signal.SIGUSR1)

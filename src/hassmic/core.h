@@ -46,6 +46,7 @@ struct proto {
     void (*dropin_result)(const char *result);  /* may be NULL: what came of a call this Echo made (dropin_results) */
     void (*button)(const char *event);          /* may be NULL: a button was pressed or held (core_button_events) */
     void (*wake)(const char *event);            /* may be NULL: the wake word heard (core_wake_events) */
+    void (*alarms_changed)(int rang);           /* may be NULL: the alarm clock's state changed; rang: the slot that started ringing, -1 none, -2 only the state */
 };
 extern const struct proto proto_wyoming, proto_esphome;
 
@@ -164,6 +165,9 @@ int    core_transcript(const char *text);                   /* speech to text's 
                                                                or anything with core_timer_stop_any), a Drop In or music
                                                                ("stop"); run cancelled: drop the rest of it */
 int    core_timers_ringing(char *names, size_t cap);        /* count; names: "tea, 5 min", in the order they finished */
+void   core_alarm_ring(int seconds);                        /* lock held: the alarm clock rings (as a finished timer does) for up to that long (alarms.c) */
+int    core_alarm_ringing(void);                            /* a timer or the alarm clock rings; any thread */
+const struct proto *core_proto(void);                       /* lock held: the protocol while a client is connected, else NULL */
 int    core_timer_ring(int set);                            /* seconds a ring lasts, 0 until stopped; -1 reads */
 int    core_timer_stop_any(int set);                        /* 1: any recognised speech stops a ring; -1 reads */
 enum { MUSIC_SENDSPIN = 1, MUSIC_BLUETOOTH = 2 };

@@ -70,6 +70,7 @@
 #include <arpa/inet.h>
 #include "a2dp.h"
 #include "adbwifi.h"
+#include "alarms.h"
 #include "arb.h"
 #include "diag.h"
 #include "dropin.h"
@@ -105,7 +106,7 @@ enum {
     BLE_READ, BLE_WRITE_REQ, BLE_READ_DESC_REQ, BLE_WRITE_DESC_REQ, BLE_NOTIFY_REQ, BLE_NOTIFY_DATA, BLE_CONN_FREE_REQ,
     BLE_CONN_FREE, BLE_GATT_ERROR, BLE_WRITTEN, BLE_NOTIFY, BLE_PAIRED, BLE_UNPAIRED, BLE_UNSUBSCRIBE, BLE_CACHE_CLEARED,
     BLE_RAW_ADV = 93, BLE_SCANNER_STATE = 126, BLE_SCANNER_SET_MODE = 127, LIST_EVENT = 107, EVENT = 108,
-    LIST_BUTTON = 61, BUTTON_COMMAND = 62,
+    LIST_TIME = 103, TIME_STATE, TIME_COMMAND, LIST_BUTTON = 61, BUTTON_COMMAND = 62,
     LIST_LIGHT = 15, LIGHT_STATE = 24, LIGHT_COMMAND = 32,
 };
 enum { COLOR_MODE_RGB = 35 };           /* on/off, brightness and RGB: the light ring's one mode */
@@ -127,7 +128,9 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_FIRMWARE, KEY_ARB_HANDOFF, KEY_WEB_URL, KEY_IDENTIFY, KEY_RESET,
        KEY_TIMER_RINGING, KEY_TIMER_NAMES, KEY_DROPIN_SERVICE, KEY_DROPIN_STATE, KEY_DROPIN_PEER, KEY_DROPIN_END, KEY_RESTART,
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
-       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_BT_AAC, KEY_BT_SECURE };
+       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_BT_AAC, KEY_BT_SECURE,
+       KEY_ALARM_ON, KEY_ALARM_TIME = KEY_ALARM_ON + ALARM_SLOTS, KEY_ALARM_REPEAT = KEY_ALARM_TIME + ALARM_SLOTS,
+       KEY_ALARM_STOP = KEY_ALARM_REPEAT + ALARM_SLOTS, KEY_ALARM_SNOOZE, KEY_ALARM_RINGING, KEY_ALARM_EVENT, KEY_ALARM_NEXT };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -414,6 +417,13 @@ static void send_setting(int key)       /* lock held */
         if (ble_present()) { PB(t, 160); char st[120]; a2dp_out_status(st, sizeof st); pb_fixed32(&t, 1, key); pb_str(&t, 2, st); send_state(TEXT_SENSOR_STATE, &t); }
         break;
     case KEY_SOC_TEMP: case KEY_CPU_USAGE: break;                 /* pushed by diag_thread every 30 s */
+    case KEY_ALARM_RINGING: pb_uint(&b, 2, alarms_ringing() >= 0); send_state(BINARY_SENSOR_STATE, &b); break;
+    case KEY_ALARM_NEXT: {                      /* unknown: no alarm on, or no clock to ring by */
+        PB(t, 96); char at[40]; long long n = alarms_next();
+        pb_fixed32(&t, 1, key);
+        if (n >= 0) { iso_utc(n, at, sizeof at); pb_str(&t, 2, at); } else pb_uint(&t, 3, 1);
+        send_state(TEXT_SENSOR_STATE, &t);
+    } break;
     case KEY_FIRMWARE: pb_str(&b, 2, RUNNING_VERSION); send_state(TEXT_SENSOR_STATE, &b); break;
     }
 }
@@ -587,6 +597,76 @@ static int listed(int key)
     }
 }
 
+/* ---------------------------------------------------------------- alarm clock (alarms.h) */
+
+static void send_alarm_states(void)     /* lock held */
+{
+    for (int i = 0; i < ALARM_SLOTS; i++) {
+        struct alarm_def a; int r = -1;
+        alarms_get(i, &a);
+        { PB(b, 16); pb_fixed32(&b, 1, KEY_ALARM_ON + i); pb_uint(&b, 2, a.on); send_state(SWITCH_STATE, &b); }
+        { PB(b, 24); pb_fixed32(&b, 1, KEY_ALARM_TIME + i); pb_uint(&b, 3, a.hour); pb_uint(&b, 4, a.minute); pb_uint(&b, 5, a.second);
+          send_state(TIME_STATE, &b); }
+        for (int k = 0; k < alarm_nrepeat; k++) if (alarm_repeat_days[k] == a.days) r = k;
+        { PB(b, 32); pb_fixed32(&b, 1, KEY_ALARM_REPEAT + i);      /* days the select has no option for (a hand-edited file): unknown */
+          if (r >= 0) pb_str(&b, 2, alarm_repeat_names[r]); else pb_uint(&b, 3, 1);
+          send_state(SELECT_STATE, &b); }
+    }
+    send_setting(KEY_ALARM_RINGING); send_setting(KEY_ALARM_NEXT);
+}
+
+static void send_alarm_entities(void)
+{
+    for (int i = 0; i < ALARM_SLOTS; i++) {
+        char id[32], name[32];
+        { PB(b, 128); snprintf(id, sizeof id, "alarm_%d", i + 1); snprintf(name, sizeof name, "Alarm %d", i + 1);
+          pb_str(&b, 1, id); pb_fixed32(&b, 2, KEY_ALARM_ON + i); pb_str(&b, 3, name); pb_str(&b, 5, "mdi:alarm"); send_msg(LIST_SWITCH, &b); }
+        { PB(b, 128); snprintf(id, sizeof id, "alarm_%d_time", i + 1); snprintf(name, sizeof name, "Alarm %d time", i + 1);
+          pb_str(&b, 1, id); pb_fixed32(&b, 2, KEY_ALARM_TIME + i); pb_str(&b, 3, name); pb_str(&b, 5, "mdi:clock-outline"); send_msg(LIST_TIME, &b); }
+        { PB(b, 384); snprintf(id, sizeof id, "alarm_%d_repeat", i + 1); snprintf(name, sizeof name, "Alarm %d repeat", i + 1);
+          pb_str(&b, 1, id); pb_fixed32(&b, 2, KEY_ALARM_REPEAT + i); pb_str(&b, 3, name); pb_str(&b, 5, "mdi:calendar-sync");
+          for (int k = 0; k < alarm_nrepeat; k++) pb_str(&b, 6, alarm_repeat_names[k]);
+          send_msg(LIST_SELECT, &b); }
+    }
+    { PB(b, 128); pb_str(&b, 1, "stop_alarm"); pb_fixed32(&b, 2, KEY_ALARM_STOP); pb_str(&b, 3, "Stop alarm"); pb_str(&b, 5, "mdi:alarm-off");
+      send_msg(LIST_BUTTON, &b); }
+    { PB(b, 128); pb_str(&b, 1, "snooze_alarm"); pb_fixed32(&b, 2, KEY_ALARM_SNOOZE); pb_str(&b, 3, "Snooze alarm"); pb_str(&b, 5, "mdi:alarm-snooze");
+      send_msg(LIST_BUTTON, &b); }
+    { PB(b, 128); pb_str(&b, 1, "alarm_ringing"); pb_fixed32(&b, 2, KEY_ALARM_RINGING); pb_str(&b, 3, "Alarm ringing"); pb_str(&b, 8, "mdi:alarm-bell");
+      send_msg(LIST_BINARY_SENSOR, &b); }
+    /* which alarm started ringing, for automations ("When Alarm fires with alarm_1"); missed while nobody is connected */
+    { PB(b, 192); pb_str(&b, 1, "alarm"); pb_fixed32(&b, 2, KEY_ALARM_EVENT); pb_str(&b, 3, "Alarm"); pb_str(&b, 5, "mdi:alarm");
+      for (int i = 0; i < ALARM_SLOTS; i++) { char t[24]; snprintf(t, sizeof t, "alarm_%d", i + 1); pb_str(&b, 9, t); }
+      send_msg(LIST_EVENT, &b); }
+    { PB(b, 128); pb_str(&b, 1, "next_alarm"); pb_fixed32(&b, 2, KEY_ALARM_NEXT); pb_str(&b, 3, "Next alarm"); pb_str(&b, 5, "mdi:alarm-check");
+      pb_str(&b, 8, "timestamp"); send_msg(LIST_TEXT_SENSOR, &b); }
+}
+
+/* lock held: the switch, time and repeat commands, and the buttons.  0: not the alarm clock's */
+static int on_alarm_command(unsigned type, unsigned key, int on, const char *opt, const unsigned char *p, const unsigned char *end)
+{
+    struct alarm_def a; struct pbf f; int i;
+    if (type == BUTTON_COMMAND && key == KEY_ALARM_STOP) alarms_stop();
+    else if (type == BUTTON_COMMAND && key == KEY_ALARM_SNOOZE) { if (!alarms_snooze()) fprintf(stderr, "alarm clock: snooze, but no alarm rings\n"); }
+    else if (type == SWITCH_COMMAND && key >= KEY_ALARM_ON && key < KEY_ALARM_ON + ALARM_SLOTS) {
+        alarms_get(i = key - KEY_ALARM_ON, &a); a.on = on; alarms_set(i, &a);
+    } else if (type == SELECT_COMMAND && key >= KEY_ALARM_REPEAT && key < KEY_ALARM_REPEAT + ALARM_SLOTS) {
+        alarms_get(i = key - KEY_ALARM_REPEAT, &a);
+        for (int k = 0; k < alarm_nrepeat; k++) if (!strcmp(opt, alarm_repeat_names[k])) { a.days = alarm_repeat_days[k]; alarms_set(i, &a); }
+    } else if (type == TIME_COMMAND && key >= KEY_ALARM_TIME && key < KEY_ALARM_TIME + ALARM_SLOTS) {
+        alarms_get(i = key - KEY_ALARM_TIME, &a);
+        a.hour = a.minute = a.second = 0;                   /* zero values are left out of the message */
+        while (pb_next(&p, end, &f)) {
+            if (f.field == 2) a.hour = f.v < 24 ? (int)f.v : 23;
+            else if (f.field == 3) a.minute = f.v < 60 ? (int)f.v : 59;
+            else if (f.field == 4) a.second = f.v < 60 ? (int)f.v : 59;
+        }
+        alarms_set(i, &a);
+    } else return 0;
+    send_alarm_states();
+    return 1;
+}
+
 static void send_setting_entities(void)
 {
     static const char *const eq_ids[] = { "equalizer_bass", "equalizer_mid", "equalizer_treble" };
@@ -714,6 +794,7 @@ static void send_setting_entities(void)
     }
     if (core_web_port) { PB(b, 128); pb_str(&b, 1, "web_ui_address"); pb_fixed32(&b, 2, KEY_WEB_URL); pb_str(&b, 3, "Web UI address");
       pb_str(&b, 5, "mdi:web"); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
+    send_alarm_entities();
     /* diagnostics, disabled by default in Home Assistant: SoC temperature and CPU usage, pushed every 30 s */
     { PB(b, 192); pb_str(&b, 1, "soc_temperature"); pb_fixed32(&b, 2, KEY_SOC_TEMP); pb_str(&b, 3, "SoC temperature");
       pb_str(&b, 5, "mdi:thermometer"); pb_str(&b, 6, "\xc2\xb0" "C"); pb_uint(&b, 7, 1); pb_str(&b, 9, "temperature"); pb_uint(&b, 10, 1);
@@ -738,13 +819,14 @@ static void send_setting_entities(void)
 
 static void on_setting(unsigned type, const unsigned char *p, const unsigned char *end)
 {
-    struct pbf f; unsigned key = 0; float num = 0; int on = 0; char opt[32] = "";
+    struct pbf f; unsigned key = 0; float num = 0; int on = 0; char opt[32] = ""; const unsigned char *msg0 = p;
     while (pb_next(&p, end, &f)) {
         if (f.field == 1) key = f.v;
         else if (f.field == 2 && f.wire == 5) { uint32_t u = f.v; memcpy(&num, &u, 4); }
         else if (f.field == 2 && f.wire == 0) on = f.v != 0;
         else if (f.field == 2 && f.data) pbf_str(&f, opt, sizeof opt);
     }
+    if (on_alarm_command(type, key, on, opt, msg0, end)) return;
     if (type == SELECT_COMMAND && key == KEY_DENOISE) { for (int i = 0; i < 4; i++) if (!strcmp(opt, denoise_names[i])) core_mic_denoise(i); }
     else if (type == SELECT_COMMAND && key == KEY_BT_LANG) { for (int i = 0; i < bt_lang_count; i++) if (!strcmp(opt, bt_langs[i].name)) settings_bt_lang_index(i); }
     else if (type == NUMBER_COMMAND && key == KEY_MIC_LEVEL) {
@@ -1516,6 +1598,7 @@ static void send_all_settings(void)
         send_setting(KEY_DROPIN_PEER); send_setting(KEY_DROPIN_STATE);
         send_setting(KEY_ASSIST_VOLUME); send_setting(KEY_SOUNDS_VOLUME); send_setting(KEY_TIMER_VOLUME); send_setting(KEY_CALL_VOLUME);
         send_light_states();
+    send_alarm_states();
 }
 
 static void settings_changed(void) { send_all_settings(); }      /* lock held: a setting changed (web page, settings.c) */
@@ -1581,14 +1664,18 @@ static int handle(unsigned type, const unsigned char *p, size_t len)
             if (f.field == 1 && f.wire == 5) epoch = (uint32_t)f.v;
             else if (f.field == 2 && f.wire == 2) pbf_str(&f, tz, sizeof tz);
         }
-        if (c >= 0 && clients[c].keyed && epoch) { clock_from_ha(epoch); clock_zone_from_ha(tz); }
+        if (c >= 0 && clients[c].keyed && epoch) {
+            clock_from_ha(epoch); clock_zone_from_ha(tz);
+            if (epoch >= 1704067200) { alarms_time(epoch, tz); send_setting(KEY_ALARM_NEXT); }     /* the alarm clock keeps its own offset to the boot clock */
+        }
     } break;
-    case SELECT_COMMAND: case NUMBER_COMMAND: case SWITCH_COMMAND: on_setting(type, p, end); break;
+    case SELECT_COMMAND: case NUMBER_COMMAND: case SWITCH_COMMAND: case TIME_COMMAND: on_setting(type, p, end); break;
     case LIGHT_COMMAND: on_light(p, end); break;
     case BUTTON_COMMAND: { struct pbf f;
         while (pb_next(&p, end, &f)) if (f.field == 1 && f.v == KEY_IDENTIFY) core_identify(); else if (f.field == 1 && f.v == KEY_RESET) core_reset("Home Assistant's button");
                                        else if (f.field == 1 && f.v == KEY_RESTART) core_reboot("Home Assistant's button");
             else if (f.field == 1 && f.v == KEY_TIMER_STOP) core_alarm_stop("Home Assistant's button");
+            else if (f.field == 1 && (f.v == KEY_ALARM_STOP || f.v == KEY_ALARM_SNOOZE)) on_alarm_command(BUTTON_COMMAND, (unsigned)f.v, 0, "", p, end);
             else if (f.field == 1 && f.v == KEY_DROPIN_END && listed(KEY_DROPIN_END)) dropin_hangup("Home Assistant's button");
         break; }
     case SUBSCRIBE_HA_ACTIONS: if (c >= 0) clients[c].actions = 1; break;
@@ -1860,6 +1947,12 @@ static int arb_send(const char *node, const char *network, const char *key)
     return n ? 0 : -1;
 }
 
+static void alarms_changed(int rang)    /* lock held */
+{
+    send_alarm_states();
+    if (rang >= 0) { PB(b, 32); char t[24]; snprintf(t, sizeof t, "alarm_%d", rang + 1); pb_fixed32(&b, 1, KEY_ALARM_EVENT); pb_str(&b, 2, t); send_state(EVENT, &b); }
+}
+
 static void arb_changed(void) { for (int k = KEY_ARB_JOIN; k <= KEY_ARB_PEERS; k++) send_setting(k); }
 
 /* lock held: our arbitration tag as scanned (arb.c).  An event, which HA fires for any device it adopted, "perform
@@ -1920,4 +2013,4 @@ static void dropin_result(const char *result)   /* lock held */
 
 const struct proto proto_esphome = { "esphome", 26053, 1, serve, start, audio, stop, cancel, played, volume_changed, mute_changed, print_mdns, bt_device,
                                      arb_send, arb_changed, sound, arb_request, settings_changed, entities_changed, arb_scan,
-                                     timers_changed, dropin_changed, dropin_result, button, wake_event };
+                                     timers_changed, dropin_changed, dropin_result, button, wake_event, alarms_changed };

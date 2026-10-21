@@ -39,6 +39,7 @@
 #endif
 #include "audio.h"
 #include "a2dp.h"
+#include "alarms.h"
 #include "arb.h"
 #include "ble.h"
 #include "improv.h"
@@ -1508,6 +1509,17 @@ void core_timer_cancelled(const char *id)
     }
 }
 
+/* the alarm clock (alarms.c): the same ring as a finished timer, without a name */
+void core_alarm_ring(int seconds)
+{
+    atomic_store(&alarm_until, mono_ms() + seconds * 1000LL);
+    fprintf(stderr, "alarm: the alarm clock rings\n");
+    alarm_set(1);
+    if (connected && proto->timers_changed) proto->timers_changed();
+}
+int core_alarm_ringing(void) { return atomic_load(&alarm_on) != 0; }
+const struct proto *core_proto(void) { return connected ? proto : NULL; }
+
 void core_alarm_stop(const char *why)
 {
     if (!atomic_load(&alarm_on)) return;
@@ -2482,6 +2494,7 @@ int main(int argc, char **argv)
     if (dropin_port && arb_running() && dropin_start(dropin_port)) fprintf(stderr, "drop in: not available\n");
 
     pthread_t cap_t, play_t, ear_t;
+    { pthread_t at; alarms_init(); if (!pthread_create(&at, NULL, alarm_thread, NULL)) pthread_detach(at); }
     pthread_create(&cap_t, NULL, capture_thread, NULL);
     pthread_create(&play_t, NULL, playback_thread, NULL);
     pthread_create(&ear_t, NULL, earcon_thread, NULL);
