@@ -43,7 +43,8 @@ FORCE:
 # A model without the Amazon mixer or Pryon has no use for the tools built on them: they drop out with the library.
 BIN := $(OUT)/hassmic $(OUT)/runas $(OUT)/otatool \
        $(if $(filter libmixerAPI.so,$(LIBS)),$(OUT)/mixcap $(OUT)/mixplay $(OUT)/latency) \
-       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test)
+       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test) \
+       $(if $(PERF_STUB),$(OUT)/libperf_cpu_info_parser.so)
 
 .DEFAULT_GOAL := all
 all: $(BIN)
@@ -144,6 +145,13 @@ $(OUT)/a2dpprobe: src/tools/a2dpprobe.c src/include/aipc_api.h
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $< -o $@ -pie -fuse-ld=lld -ldl
 
+# Stand-in for the firmware's libperf_cpu_info_parser.so on an Echo without perfmonitord (scripts/debloat.sh installs it;
+# device.mk: PERF_STUB).  Three functions, no dependencies, so no stock library to link and no -pie: a plain shared object
+# with the soname the mixer asks for.  src/stubs/perf_stub.c says why the mixer needs it.
+$(OUT)/libperf_cpu_info_parser.so: src/stubs/perf_stub.c
+	@mkdir -p $(OUT)
+	$(CC) -O2 -Wall -Wextra -fPIC -shared -nostdlib -fuse-ld=lld -Wl,-soname,libperf_cpu_info_parser.so -Wl,--hash-style=both -Wl,--build-id=none -Wl,-z,noexecstack $< -o $@
+
 # not part of "all": LD_PRELOAD shim to see a stock daemon's libcurl requests (see the file)
 $(OUT)/libcurlspy.so: src/tools/curlspy.c
 	@mkdir -p $(OUT)
@@ -205,7 +213,7 @@ host: build/hassmic-host $(OUT)/hassmic-qemu build/otatool-host
 UNIT := src/hassmic/hash.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/third_party/monocypher.c
 # One target per test, so make -j unit runs them side by side (tests/run.py does: most of them wait or compile).
 UNIT_TESTS := hash ws noise ble_crypto micgain wifimotion spkgain tz statefile ledq micdenoise earsup dha_jwt a2dp_codecs \
-	sbc web_crypto ring_pack mww blueprint_dropin
+	sbc web_crypto ring_pack mww blueprint_dropin debloat_edit
 unit: $(addprefix unit-,$(UNIT_TESTS))
 unit-hash:
 	@mkdir -p build
@@ -256,6 +264,8 @@ unit-sbc:
 	if command -v sbcenc >/dev/null; then tests/unit/sbc_ref.sh; else echo "sbc: sbcenc/sbcdec (package sbc) missing, skipped"; fi
 unit-web_crypto:
 	if command -v node >/dev/null; then .venv/bin/python tests/unit/web_crypto_test.py; else echo "web crypto: node missing, skipped"; fi
+unit-debloat_edit:
+	python3 -I tests/unit/debloat_edit_test.py
 unit-ring_pack:
 	if command -v node >/dev/null; then node tests/unit/ring_pack_test.js; else echo "ring packs: node missing, skipped"; fi
 unit-mww:

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Improv Wi-Fi over Bluetooth</title>
+<!-- A small Improv Wi-Fi client for an Echo, for a desktop Chrome / Edge (docs/GUIDE.md "Setting up from a phone").  Unlike the app it can
+     ask the Echo to scan first: what its own radio hears says whether its Wi-Fi works at all.  Packet format as in src/hassmic/improv.c.
+     Web Bluetooth needs a secure page, so serve it from localhost, do not open the file directly:
+         cd tools && python3 -m http.server 8000      then, in Chrome:      http://localhost:8000/improv-ble.html
+     macOS: Chrome must be allowed under System Settings > Privacy & Security > Bluetooth.  No outside scripts are loaded.
+     Bluetooth carries the Wi-Fi password unencrypted (that is the protocol).  An Echo that is set up and has lost its network takes a
+     new one only after a press of its action button (good for a minute); a new or reset Echo needs none. -->
+<style>
+  :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#f5f5f7; --card:#fff; --muted:#6e6e73; --line:#d2d2d7; --accent:#0071e3; --ok:#1a7f37; --bad:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#f5f5f7; --bg:#1c1c1e; --card:#2c2c2e; --muted:#98989d; --line:#48484a; --accent:#2997ff; --ok:#3fb950; --bad:#ff6b6b; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width:40rem; margin:2rem auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 22px; margin-bottom:14px; }
+  h1 { font-size:1.3rem; margin:0 0 .5rem; } h2 { font-size:1rem; margin:0 0 .6rem; }
+  button { font:inherit; font-weight:600; background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 16px; cursor:pointer; margin:0 6px 6px 0; }
+  button.sec { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  input { font:inherit; padding:7px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); width:100%; box-sizing:border-box; margin:3px 0 10px; }
+  table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); font-size:.92rem; }
+  .muted { color:var(--muted); } .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #log { font:12px/1.45 ui-monospace, monospace; white-space:pre-wrap; max-height:16rem; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  #nets tr:hover { background:var(--bg); cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>Echo Wi-Fi over Bluetooth</h1>
+    <p class="muted" style="margin:.2rem 0 .8rem">Echo powered on and close by. If it is already set up, press its action button once before provisioning.</p>
+    <button id="connect">1. Connect to the Echo</button> <button id="disconnect" class="sec" disabled>Disconnect</button>
+    <div id="status" class="muted">Not connected. Chrome will ask you to pick the Echo ("Echo Dot 3 ...").</div>
+  </div>
+
+  <div class="card">
+    <h2>2. Ask the Echo what it sees</h2>
+    <button id="info" disabled>Device info</button>
+    <button id="identify" class="sec" disabled>Identify (ring + sound)</button>
+    <button id="scan" disabled>Scan for networks</button>
+    <div id="scanstatus" class="muted">A scan takes up to 30 s. A list means the Echo's radio works; an empty list or an error means it does not see anything.</div>
+    <table id="nets" style="display:none"><thead><tr><th>Network</th><th>Signal</th><th>Security</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>3. Join a network</h2>
+    <label class="muted" for="ssid">Network name (click a row above to fill it in)</label>
+    <input id="ssid" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label class="muted" for="pass">Password (open network: leave empty)</label>
+    <input id="pass" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button id="join" disabled>Join</button>
+    <div id="joinstatus" class="muted"></div>
+  </div>
+
+  <div class="card"><h2>Log</h2><div id="log"></div><p class="muted" style="margin:.5rem 0 0"><button id="copylog" class="sec">Copy log</button></p></div>
+</main>
+<script>
+// ---- Improv Wi-Fi over BLE (https://www.improv-wifi.com/ble/), as the Echo implements it (src/hassmic/improv.c)
+const SERVICE = "00467768-6228-2272-4663-277478268000";
+const CHR = { state: "00467768-6228-2272-4663-277478268001", error: "00467768-6228-2272-4663-277478268002", rpc: "00467768-6228-2272-4663-277478268003",
+              result: "00467768-6228-2272-4663-277478268004", caps: "00467768-6228-2272-4663-277478268005" };
+const STATE = { 1: "authorization required (press the Echo's action button)", 2: "authorized", 3: "provisioning ...", 4: "provisioned" };
+const ERROR = { 0: "no error", 1: "invalid RPC packet", 2: "unknown RPC command", 3: "unable to connect to the Wi-Fi network", 4: "not authorized (press the action button)", 5: "bad host name", 255: "unknown error" };
+const CMD = { WIFI: 1, IDENTIFY: 2, INFO: 3, SCAN: 4 };
+
+const enc = new TextEncoder(), dec = new TextDecoder();
+const sum = (b) => b.reduce((a, x) => (a + x) & 0xff, 0);
+
+// command, length, data, checksum (sum of all bytes before it); the data is strings, each a length byte and its bytes
+function buildPacket(cmd, strings) {
+  const data = [];
+  for (const s of strings || []) { const b = typeof s === "string" ? enc.encode(s) : s; if (b.length > 255) throw new Error("string too long"); data.push(b.length, ...b); }
+  if (data.length > 255) throw new Error("packet too long");
+  const p = [cmd, data.length, ...data]; p.push(sum(p)); return Uint8Array.from(p);
+}
+// null while the bytes so far are not a whole packet; {cmd, strings} when they are; throws when the checksum is wrong
+function parsePacket(buf) {
+  if (buf.length < 3) return null;
+  const len = buf[1]; if (buf.length < len + 3) return null;
+  if (sum(Array.from(buf.slice(0, len + 2))) !== buf[len + 2]) throw new Error("bad checksum");
+  const strings = []; let i = 2;
+  while (i < len + 2) { const l = buf[i]; if (i + 1 + l > len + 2) throw new Error("bad string length"); strings.push(dec.decode(buf.slice(i + 1, i + 1 + l))); i += 1 + l; }
+  return { cmd: buf[0], strings, used: len + 3 };
+}
+// a scan answer: ssid, rssi, security per network (this Echo puts them all in one packet, other devices send one per packet)
+function networksFrom(strings) { const out = []; for (let i = 0; i + 2 < strings.length + 0; i += 3) out.push({ ssid: strings[i], rssi: strings[i + 1], auth: strings[i + 2] }); return out; }
+
+if (typeof module !== "undefined") module.exports = { buildPacket, parsePacket, networksFrom, sum };
+</script>
+<script>
+if (typeof document !== "undefined") (() => {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  const log = (m, cls) => { const t = new Date().toTimeString().slice(0, 8); logEl.textContent += t + "  " + m + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+  const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join(" ");
+  const set = (id, text, cls) => { const e = $(id); e.textContent = text; e.className = cls || "muted"; };
+  let device = null, chars = {}, rxbuf = [], waiters = [];
+
+  if (!navigator.bluetooth) { set("status", "This browser has no Web Bluetooth. Use Chrome or Edge, opened at http://localhost:8000 (not Safari or Firefox).", "bad"); $("connect").disabled = true; }
+  else if (!window.isSecureContext) { set("status", "Not a secure page: open it at http://localhost:8000/improv-ble.html, not as a file.", "bad"); $("connect").disabled = true; }
+
+  const enable = (on) => { for (const id of ["info", "identify", "scan", "join", "disconnect"]) $(id).disabled = !on; $("connect").disabled = on; };
+
+  async function writeRpc(packet) {
+    log("-> " + hex(packet));
+    for (let i = 0; i < packet.length; i += 20) await chars.rpc.writeValueWithResponse(packet.slice(i, i + 20));   // 20 bytes at the default MTU
+  }
+  // results come in pieces of the notification size: put them together, hand every whole packet to the waiter
+  function onResult(ev) {
+    const v = new Uint8Array(ev.target.value.buffer); log("<- " + hex(v));
+    rxbuf.push(...v); drain();
+  }
+  function drain() {
+    for (;;) {
+      let p; try { p = parsePacket(Uint8Array.from(rxbuf)); } catch (e) { log("result error: " + e.message, "bad"); rxbuf = []; return; }
+      if (!p) return;
+      rxbuf = rxbuf.slice(p.used);
+      for (const w of waiters.slice()) w(p);
+    }
+  }
+  // wait for packets of command `cmd` until `done(packets)` says enough, or `ms` pass; also reads the result characteristic if a notification stays incomplete
+  function collect(cmd, done, ms) {
+    return new Promise((resolve) => {
+      const got = []; let t0 = setTimeout(finish, ms), quiet = null, readTimer = null;
+      function finish() { clearTimeout(t0); clearTimeout(quiet); clearTimeout(readTimer); waiters = waiters.filter((x) => x !== w); resolve(got); }
+      const w = (p) => {
+        if (p.cmd !== cmd) return; got.push(p);
+        clearTimeout(quiet); if (done(got)) finish(); else quiet = setTimeout(finish, 2500);
+      };
+      waiters.push(w);
+      readTimer = setTimeout(async () => {                          // nothing whole yet: ask for the value directly (a long read)
+        if (got.length || !rxbuf.length) return;
+        try { const v = await chars.result.readValue(); log("read " + hex(new Uint8Array(v.buffer))); rxbuf = Array.from(new Uint8Array(v.buffer)); drain(); } catch (e) { log("read failed: " + e.message); }
+      }, 4000);
+    });
+  }
+
+  async function connect() {
+    set("status", "Choose the Echo in Chrome's list ...");
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }], optionalServices: [SERVICE] });
+    device.addEventListener("gattserverdisconnected", () => { log("disconnected"); set("status", "Disconnected.", "bad"); enable(false); });
+    set("status", "Connecting to " + (device.name || "the Echo") + " ...");
+    const server = await device.gatt.connect(), svc = await server.getPrimaryService(SERVICE);
+    for (const k of Object.keys(CHR)) chars[k] = await svc.getCharacteristic(CHR[k]);
+    chars.state.addEventListener("characteristicvaluechanged", (e) => { const s = e.target.value.getUint8(0); log("state: " + (STATE[s] || s)); showState(s); });
+    chars.error.addEventListener("characteristicvaluechanged", (e) => { const s = e.target.value.getUint8(0); log("error: " + (ERROR[s] || s), s ? "bad" : ""); if (s) set("joinstatus", ERROR[s] || "error " + s, "bad"); });
+    chars.result.addEventListener("characteristicvaluechanged", onResult);
+    await chars.state.startNotifications(); await chars.error.startNotifications(); await chars.result.startNotifications();
+    const s = (await chars.state.readValue()).getUint8(0), caps = (await chars.caps.readValue()).getUint8(0), er = (await chars.error.readValue()).getUint8(0);
+    log("connected: state " + s + ", capabilities 0x" + caps.toString(16) + ", error " + er);
+    set("status", "Connected to " + (device.name || "the Echo") + ". State: " + (STATE[s] || s) + ". Capabilities: " + [caps & 1 ? "identify" : "", caps & 2 ? "device info" : "", caps & 4 ? "Wi-Fi scan" : ""].filter(Boolean).join(", "), "ok");
+    enable(true);
+  }
+  function showState(s) { if (s === 4) set("joinstatus", "Provisioned: the Echo joined the network.", "ok"); else if (s === 3) set("joinstatus", "The Echo is joining ... (up to a minute)"); }
+
+  $("connect").onclick = () => connect().catch((e) => { log("connect failed: " + e.message, "bad"); set("status", "Could not connect: " + e.message, "bad"); });
+  $("disconnect").onclick = () => device && device.gatt.connected && device.gatt.disconnect();
+  $("identify").onclick = async () => { rxbuf = []; await writeRpc(buildPacket(CMD.IDENTIFY)); log("identify sent: the Echo's ring should light up"); };
+  $("info").onclick = async () => {
+    rxbuf = []; await writeRpc(buildPacket(CMD.INFO));
+    const r = await collect(CMD.INFO, (g) => g.length > 0, 8000);
+    if (!r.length) { set("scanstatus", "No answer to device info.", "bad"); return; }
+    const [fw, ver, model, name] = r[0].strings; set("scanstatus", "Firmware " + fw + " " + ver + ", model " + model + ", name " + name, "ok"); log("device info: " + r[0].strings.join(" | "));
+  };
+  $("scan").onclick = async () => {
+    rxbuf = []; $("nets").style.display = "none"; set("scanstatus", "Scanning ... (up to 30 s)");
+    await writeRpc(buildPacket(CMD.SCAN));
+    const r = await collect(CMD.SCAN, (g) => g.some((p) => p.strings.length === 0), 40000);
+    const nets = r.flatMap((p) => networksFrom(p.strings));
+    const tb = $("nets").querySelector("tbody"); tb.innerHTML = "";
+    if (!nets.length) { set("scanstatus", r.length ? "The scan finished and found no network the Echo can join." : "No answer to the scan (see the log; an 'unknown error' above means the scan did not run).", "bad"); return; }
+    for (const n of nets) { const tr = tb.insertRow(); tr.insertCell().textContent = n.ssid; tr.insertCell().textContent = n.rssi + " dBm"; tr.insertCell().textContent = n.auth === "NO" ? "open" : n.auth; tr.onclick = () => { $("ssid").value = n.ssid; $("pass").focus(); }; }
+    $("nets").style.display = ""; set("scanstatus", nets.length + " network(s): the Echo's radio works. Click a row to use it below.", "ok");
+  };
+  $("join").onclick = async () => {
+    const ssid = $("ssid").value, pass = $("pass").value; if (!ssid) { set("joinstatus", "Enter the network name.", "bad"); return; }
+    rxbuf = []; set("joinstatus", "Sent. Waiting for the Echo ...");
+    await writeRpc(buildPacket(CMD.WIFI, [ssid, pass]));
+    const r = await collect(CMD.WIFI, (g) => g.length > 0, 75000);
+    if (r.length) { const u = r[0].strings[0]; set("joinstatus", "Provisioned" + (u ? ". The Echo says to open " + u : "."), "ok"); log("provisioned " + (u || "")); }
+    else if (!$("joinstatus").className.includes("bad") && !$("joinstatus").className.includes("ok")) set("joinstatus", "No answer within 75 s.", "bad");
+  };
+  $("copylog").onclick = () => navigator.clipboard.writeText(logEl.textContent);
+})();
+</script>
+</body>
+</html>

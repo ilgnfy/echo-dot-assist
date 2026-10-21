@@ -1,0 +1,106 @@
+# Amazon cloud / Alexa / telemetry / update services removed from the Echo Dot 3's system partition by scripts/debloat.sh.
+# One action per line:  rc <path>              move that init file to /system/.debloat/ (init stops knowing the services in it)
+#                       block <file> <name>... delete the `service <name>` blocks from a file that holds other things too
+# Phase 1 = init definitions only (binaries stay, nothing can start them).  Every service here was stopped live on the running
+# Echo first (device-logs/cleanup/runtime-test.log) with mixer, ledcontroller, buttons, wake word and the HA link unaffected.
+# Reasons, per service, in device-logs/inventory-donut/SERVICES.md (not in git: derived from the firmware).
+
+# --- Alexa client and its helpers
+rc /system/etc/init/init.dacd.rc
+rc /system/etc/init/init.smarthomed.rc
+rc /system/etc/init/ahe_noart.rc
+rc /system/etc/init/shs.rc
+block /init.project.rc puffin
+block /init.mt8516.rc puffinmrmd
+block /init.whad_cc.rc quantum
+
+# --- Alexa Communications, presence, mesh, accessory kit, Sidewalk
+rc /system/etc/init/init.commsd.rc
+rc /system/etc/init/init.inloc_service.rc
+rc /system/etc/init/init.blemesh_service.rc
+rc /system/etc/init/init.ama_server.rc
+rc /vendor/etc/init/legacy-sidewalk-services.rc
+rc /vendor/etc/init/halo-msg-bridge.rc
+rc /system/etc/init/init.socks.rc
+
+# --- Neo framework and the three apps it hosts (credential rotation, Diode remote diagnostics/commands, stock factory reset)
+rc /system/etc/init/init.neo-init.rc
+rc /system/etc/init/init.neo-service-coordinator.rc
+rc /system/etc/init/init.credential_manager_service.rc
+
+# --- telemetry, metrics, logs, usage statistics
+rc /system/etc/init/ace_metricd.rc
+rc /system/etc/init/ace_usagestat_protod.rc
+rc /system/etc/init/aceusagestatd.rc
+rc /system/etc/init/acedropboxd.rc
+rc /system/etc/init/minerva_service.rc
+rc /system/etc/init/logmgr.rc
+rc /system/etc/init/init.trackerd.rc
+rc /system/etc/init/init.fmonitor.rc
+rc /system/etc/init/init.ace.coex_metric.rc
+rc /system/etc/init/init.udsscamp.rc
+rc /system/etc/init/init.adepd.rc
+
+# --- account, provisioning, attestation, tokens, setup mode
+rc /system/etc/init/dha.rc
+rc /system/etc/init/ffs_provisionee_svc.rc
+rc /system/etc/init/init.provisionerd.rc
+rc /system/etc/init/init.uxeventd.rc
+rc /system/etc/init/init.ace.messaging.rc
+block /init.mt8516.rc tokend ace_messaging assetmgrd gadgetsd cmbd davsCheckAsDavs davsCheckAsRoot
+
+# --- out-of-box setup mode (voice prompts, Wi-Fi Direct for the Alexa app).  The firewall services in the same file stay:
+# lockdown.sh builds on the rules stock's firewall.sh loads.
+block /system/etc/init/init.oobe.puffin.rc oobed_on_boot oobed_on_press oobed_on_no_nw oobe_setup
+
+# --- firmware updates and Amazon's clock
+rc /system/etc/init/init.ace.otad.rc
+rc /system/etc/init/on_demand_update_engine.rc
+rc /system/etc/init/sntp_timeupdate.rc
+block /init.mt8516.rc otad sntpd
+
+# --- retail demo, Bluetooth manager (hassmic owns the controller)
+rc /system/etc/init/init.demo_d3.rc
+block /init.ace.rc btmanagerd
+
+# --- performance monitoring.  mixer links libperf_cpu_info_parser and calls perfmonitord_initConnection / dumpPerfCpuInfo /
+# closeConnection; without perfmonitord each connect hangs 20 s in the mixer, the mic stream starves ("micAsr delivers
+# nothing (status 110)") and the wake word stops (cold boot 2026-10-21).  So the library is replaced by src/stubs/perf_stub.c
+# (three functions, no dependencies; committed built in devices/donut/prebuilt/, rebuilt by `make DEVICE=donut`), then the daemons can go:
+# they only collect memory/CPU statistics for Amazon's metrics, reboot after a week of high memory, and set a memory cgroup.
+install devices/donut/prebuilt/libperf_cpu_info_parser.so /system/lib/libperf_cpu_info_parser.so
+rc /init.perfmonitord.rc
+rc /init.perfhald.rc
+rc /init.perfrecoveryd.rc
+unimport /init.project.rc init.perfmonitord.rc init.perfhald.rc init.perfrecoveryd.rc
+
+# --- `start`/`stop`/`restart` lines that name a removed service: init only logs "Service not found" for them, but they are dead text
+unstart /init.mt8516.rc UdssCampSvc ace_coex_metric ace_messaging ace_metricd ace_otad acedropboxd aceusagestatd adepd ahe ahe_firewall amakit_server assetmgrd blemesh_service btmanagerd cmbd commsd credmgrsvc dacd davsCheckAsDavs davsCheckAsRoot demo_d3 dha_self_test dha_service fetchtoken_reg fmonitor gadgetsd halo-bssid-scan halo-core-swp halo-hub-broker halo-hub-core halo-logr halo-msg-bridge halo-regiond inloc_service logmgr minerva_service neo-coordinator neo-init oobe_setup oobed_on_boot oobed_on_no_nw oobed_on_press otad perfhald perfmonitord perfrecoveryd provisionee_svc provisionerd puffin puffinmrmd quantum shs sidewalk-init smarthomed sntpd socks5stream time_update tokend trackerd update_engine usagestat_protod uxeventd
+unstart /system/etc/init/init.oobe.puffin.rc oobed_on_boot oobed_on_press oobed_on_no_nw oobe_setup
+unstart /init.whad_cc.rc quantum
+
+# --- boot-time calls and /data folders of the removed services (all plain mkdir/chown/chmod, plus one migration script that
+# is not even on this firmware: `exec ... csm2puffin.sh`, and a `start` of csm2puf_rollback, which does not exist)
+unline /init.mt8516.rc ^\s*(mkdir|chown|chmod)( -R)? .*(/data/(wha|gadgets|cmbd|avs|hybridrouter|davs)|cmbd\.db|messaging\.db|csm2puffin)
+unline /init.mt8516.rc ^\s*exec .*csm2puffin\.sh
+unstart /init.mt8516.rc csm2puf_rollback
+unline /init.puffin.rc ^\s*chown puffin puffin /data/avs
+unline /init.aosp.rc ^\s*mkdir /data/misc/update_engine
+
+# --- scripts of ours that only exist to bring Alexa back
+file /system/hassmic/alexa-on.sh
+
+# --- Amazon's factory-reset daemon: the one Amazon process left with network permission (group inet) and cloud-capable
+# libraries mapped (libace_connectivity_manager, libace_map ...).  Its only client was the Neo app removed above; hassmic has
+# its own reset (action button held 10 s, HA button, settings page).  fr_service (init.factory_reset.rc) stays: disabled,
+# started by nothing, no network.
+rc /system/etc/init/init.factory-reset.rc
+
+# --- the ACE sensor service: registers one sensor (the ambient light sensor) for clients, and nothing connects to it (no process maps
+# libace_sensors_client).  hassmic reads the sensor from sysfs.  Removed 2026-10-21 as a test; `debloat.sh revert` while it is in quarantine.
+rc /system/etc/init/ace_sensorsd.rc
+
+# --- init files for services of the second pass (Matter, eMMC metrics, update rollback); nothing starts them any more
+rc /system/etc/init/init.chipservice.rc
+rc /system/etc/init/amzn_mmc_utils.rc
+rc /system/etc/init/backup_whitelist.rc

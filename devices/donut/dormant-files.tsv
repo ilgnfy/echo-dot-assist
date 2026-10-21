@@ -1,0 +1,276 @@
+# Installed but neither running nor loaded on the cleaned Dot 3 (2026-10-21): 153 executables and 118 libraries, classified by reading them.
+# path<TAB>kind<TAB>class<TAB>why.  remove = Amazon service/cloud code that nothing starts; optional = local developer tools; keep = platform.
+# NOT a list to delete from: 'dormant' here means 'not running at this instant'.  Tools init or our scripts start (kvs_util, wifisvc, firewall.sh, the boot
+# scripts), kernel modules (*.ko) and Android hardware modules are in it and are needed.  Nothing has been removed from this list yet.
+# 2026-10-21 correction: audio_manager_get_prop/set_prop and lipc-get-prop/set-prop are run by hassmic (main.c, btout.c): keep; so are liborpheusaudiomanager/utils, which they link.
+bin/SkillContainer	exe	remove	Alexa skill container (runs skills for the Alexa client)
+bin/Todo	exe	remove	Alexa to-do sample/app (Amazon account via maplite, Wi-Fi manager)
+bin/ace	exe	remove	ACE integration-test runner (links the ACE test libraries)
+bin/ace_blemesh_cli	exe	remove	command line for the BLE-mesh service (removed)
+bin/ace_chip_cli	exe	remove	command line for the Matter/CHIP service
+bin/ace_chip_service	exe	remove	Matter (CHIP) smart-home service; its init file init.chipservice.rc is still in /system/etc/init
+bin/ace_dioded	exe	remove	Diode daemon: Amazon's remote diagnostics/command channel (its Neo app is gone)
+bin/ace_inloc_cli	exe	remove	command line for indoor localization (service removed)
+bin/aceipc-daemon	exe	optional	ACE IPC daemon (not used: AIPC goes through sockets in /dev/aipc)
+bin/aceipc-get-prop	exe	optional	ACE IPC: read a property
+bin/aceipc-probe	exe	optional	ACE IPC: probe a service
+bin/aceipc-send-event	exe	optional	ACE IPC: send an event
+bin/aceipc-set-prop	exe	optional	ACE IPC: set a property
+bin/aceipc-wait-event	exe	optional	ACE IPC: wait for an event
+bin/aipc-get-prop	exe	optional	AIPC: read a property
+bin/aipc-probe	exe	optional	AIPC: probe a service
+bin/aipc-send-event	exe	optional	AIPC: send an event
+bin/aipc-send-request	exe	optional	AIPC: send a request
+bin/aipc-set-prop	exe	optional	AIPC: set a property
+bin/aipc-wait-event	exe	optional	AIPC: wait for an event
+bin/alsctrl	exe	optional	ambient light sensor control tool (acehal_ambientLightSensor)
+bin/amakit_cli	exe	remove	command line for AMA kit (service removed)
+bin/amzn_dha_tool	exe	remove	device attestation tool (DHA)
+bin/amzn_mmc_utils	exe	remove	eMMC health report (ext_csd life-time, TLC/MLC level) for Amazon's metrics; init file amzn_mmc_utils.rc
+bin/amzn_xo_tool	exe	keep	started or called by init or a script that stays (amzn_xo_tool.rc)
+bin/applypatch	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/appops	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/asp_client_cmd	exe	optional	command line client of the audio front end libasp (JSON); mic debugging
+bin/atrace	exe	keep	started or called by init or a script that stays (atrace.rc)
+bin/audio_manager_get_prop	exe	keep	REQUIRED: hassmic runs it to read the mixer's volumes (main.c)
+bin/audio_manager_set_prop	exe	keep	REQUIRED: hassmic runs it to set the mixer's volumes (main.c)
+bin/backup_whitelist	exe	remove	backup/rollback whitelist of Amazon's update machinery; init file backup_whitelist.rc
+bin/blkid	exe	keep	started or called by init or a script that stays (vold.rc, factory_init.rc)
+bin/bmgr	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/bootstat	exe	keep	started or called by init or a script that stays (bootstat.rc)
+bin/bspatch	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/btclient	exe	optional	Bluetooth AVRCP test client (sendrckey)
+bin/btclient_ble	exe	optional	Bluetooth LE test client
+bin/btmac.sh	exe	keep	started or called by init or a script that stays (init.mt8516.rc)
+bin/bugreport	exe	keep	started or called by init or a script that stays (meta_init.rc, dumpstate.rc)
+bin/bugreportz	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/button-press	exe	remove	script that simulates a button press for the Sidewalk hub tests
+bin/cmd	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/demo_cx	exe	remove	Alexa notifier demo (links libacsdkNotifier)
+bin/dhcpcd-run-hooks	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/dhcpcd_static.sh	exe	keep	started or called by init or a script that stays (init.mt8516.rc)
+bin/disable_rf.sh	exe	keep	started or called by init or a script that stays (init.mt8516.rc)
+bin/dnsmasq	exe	keep	started or called by init or a script that stays (init.mt8516.rc, alexa-off.sh)
+bin/dumpstate	exe	keep	started or called by init or a script that stays (dumpstate.rc, init.mt8167.rc)
+bin/dumpsys	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/enableswap.sh	exe	keep	started or called by init or a script that stays (init.mt8167.rc)
+bin/firewall.sh	exe	keep	started or called by init or a script that stays (init.oobe.puffin.rc, lockdown.sh)
+bin/gzip	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/healthcheck	exe	keep	started or called by init or a script that stays (init.mt8516.rc)
+bin/hostapd	exe	optional	Wi-Fi access-point daemon (setup mode); unused, local
+bin/hostapd_cli	exe	optional	hostapd control
+bin/idme	exe	keep	started or called by init or a script that stays (init.ledcontroller.rc, init.mt8167.rc)
+bin/ime	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/input	exe	keep	started or called by init or a script that stays (init.mt8516.rc, factory_init.rc)
+bin/ip6tables	exe	keep	started or called by init or a script that stays (lockdown.sh, main.sh)
+bin/iptables	exe	keep	started or called by init or a script that stays (wifi-join.sh, probe.sh)
+bin/iw	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/iwpriv	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/kvs_util	exe	keep	started or called by init or a script that stays (init.ace.rc)
+bin/ledctrl	exe	keep	started or called by init or a script that stays (main.sh, alexa-on.sh)
+bin/ledctrl_aipc	exe	optional	light ring control over AIPC
+bin/lipc-daemon	exe	optional	LIPC daemon (hassmic uses liblipc directly)
+bin/lipc-get-prop	exe	keep	REQUIRED: hassmic runs it for the Bluetooth speaker output (btout.c)
+bin/lipc-hash-prop	exe	optional	LIPC: hash property
+bin/lipc-probe	exe	optional	LIPC: probe
+bin/lipc-send-event	exe	optional	LIPC: send an event
+bin/lipc-set-prop	exe	keep	REQUIRED: hassmic runs it for the Bluetooth speaker output (btout.c)
+bin/lipc-tests/clean_lipc_env	exe	optional	LIPC: clean the environment
+bin/lipc-tests/runtest	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/lipc-wait-event	exe	optional	LIPC: wait for an event
+bin/logcat	exe	keep	started or called by init or a script that stays (davs-spy.sh)
+bin/logwrapper	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/make_ext4fs	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/media	exe	keep	started or called by init or a script that stays (meta_init.rc, servicemanager.rc)
+bin/monkey	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/mozartd	exe	remove	JSON-over-LIPC request server ('Mozart') for Amazon apps; nothing starts it
+bin/mtpd	exe	keep	started or called by init or a script that stays (mtpd.rc)
+bin/ndc	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/p2p_dnsmasq.sh	exe	keep	started or called by init or a script that stays (init.mt8516.rc, p2p_dnsmasq.sh)
+bin/perf_cpu_info_parser	exe	remove	command line of the performance stack (perfmonitord, removed)
+bin/ping	exe	keep	started or called by init or a script that stays (lockdown.sh, wifi.sh)
+bin/ping6	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/pm	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/pppd	exe	keep	started or called by init or a script that stays (init.mt8167.rc)
+bin/pre_factory_reset.sh	exe	keep	started or called by init or a script that stays (init.factory_reset.rc)
+bin/pwrsvc_autosleep.sh	exe	keep	started or called by init or a script that stays (pwrsvcd.rc)
+bin/pwrsvc_cli	exe	keep	started or called by init or a script that stays (pwrsvc_autosleep.sh)
+bin/racoon	exe	keep	started or called by init or a script that stays (racoon.rc)
+bin/random_seed.sh	exe	keep	started or called by init or a script that stays (init.randomseed.rc)
+bin/reboot	exe	keep	started or called by init or a script that stays (bootstat.rc, init.mt8516.rc)
+bin/run-as	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/schedtest	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/sdcard	exe	keep	started or called by init or a script that stays (meta_init.rc, init.environ.rc)
+bin/secdiscard	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/service	exe	keep	started or called by init or a script that stays (init.factory-reset.rc, init.randomseed.rc)
+bin/set_memtotal_prop.sh	exe	keep	started or called by init or a script that stays (init.mt8516.rc)
+bin/sgdisk	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/shmbuf_tool	exe	optional	shared-memory buffer tool
+bin/shmq_tool	exe	optional	shared-memory queue tool
+bin/shscli	exe	remove	command line of the smart-home skill service
+bin/smarthome_utility_puffin	exe	remove	smart-home utility; contains an Amazon S3 test bucket URL
+bin/softhsm2-util	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/start_animation.sh	exe	keep	started or called by init or a script that stays (start_animation_noart.rc)
+bin/stop_animation.sh	exe	keep	started or called by init or a script that stays (stop_animation_noart.rc)
+bin/svc	exe	keep	started or called by init or a script that stays (main.sh)
+bin/tc	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/tinycap	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/tinyctlplay	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/tinymix	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/tinypcminfo	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/tinyplay	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/toolbox	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+bin/tzdatacheck	exe	keep	started or called by init or a script that stays (meta_init.rc, init.aosp.rc)
+bin/update_verifier	exe	keep	started or called by init or a script that stays (meta_init.rc, init.mt8516.rc)
+bin/vdc	exe	keep	started or called by init or a script that stays (multi_init.rc, factory_init.rc)
+bin/vold	exe	keep	started or called by init or a script that stays (meta_init.rc, multi_init.rc)
+bin/wifi_monitor	exe	remove	Amazon's Wi-Fi monitor: listens to ACE net events (profiles, captive portal) and reports; nothing starts it
+bin/wifisvc	exe	keep	started or called by init or a script that stays (init.mt8516.rc, main.sh)
+bin/wipe_fos_flags	exe	keep	started or called by init or a script that stays (init.mt8516.rc)
+bin/wpa_cli	exe	keep	started or called by init or a script that stays (wifi-join.sh, probe.sh)
+vendor/bin/autokd	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/control-metrics-reporter	exe	remove	Sidewalk (halo) metrics reporter
+vendor/bin/core-plugin-loader	exe	remove	Sidewalk hub core plug-in loader
+vendor/bin/core-system-reset.sh	exe	remove	Sidewalk hub reset script
+vendor/bin/dhcp6c	exe	keep	started or called by init or a script that stays (init.mt8167.rc)
+vendor/bin/dhcp6ctl	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/dhcp6s	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/dmlog	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/fsck_msdos_mtk	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/fwenv	exe	remove	Sidewalk hub firmware environment script
+vendor/bin/get-core-stats	exe	remove	Sidewalk hub statistics script
+vendor/bin/halo_common_lib.sh	exe	remove	Sidewalk (halo) shell library
+vendor/bin/hub-event	exe	remove	Sidewalk hub event script
+vendor/bin/init_full_halo_services.sh	exe	remove	starts the full Sidewalk service set
+vendor/bin/lcdc_screen_cap	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/libremote-dumper	exe	remove	Sidewalk hub remote dumper
+vendor/bin/msensord	exe	keep	started or called by init or a script that stays (init.mt8167.rc)
+vendor/bin/nvram_daemon	exe	keep	started or called by init or a script that stays (meta_init.rc, factory_init.rc)
+vendor/bin/radvd	exe	keep	started or called by init or a script that stays (init.mt8167.rc)
+vendor/bin/resize_ext4	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/superumount	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/terservice	exe	remove	Sidewalk 'ter' service
+vendor/bin/tertestclient	exe	remove	test client of the Sidewalk 'ter' service
+vendor/bin/tiny_mkswap	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/tiny_swapoff	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/tiny_swapon	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/wfca	exe	keep	Android/toybox/MediaTek platform tool or daemon; local, no Amazon code
+vendor/bin/zbus-publish	exe	remove	Sidewalk hub message bus publisher
+lib/ah_shs/libSmartHomeSkill_ace.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/ah_shs/libc++_shared.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/alexahybrid/libahe_alerts_skill.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/alexahybrid/libahe_chrono_skill.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/alexahybrid/libahe_stop_fallback_skill.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/alexahybrid/libahe_volume_control_skill.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/alexahybrid/libfst.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/alexahybrid/libfstfar.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/crtbegin_so.o	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/crtend_so.o	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/egl/libGLES_android.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/amzn_dha.mt8167.so	lib	remove	device attestation HAL (DHA)
+lib/hw/audio.primary.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/audio.r_submix.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/audio.usb.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/audio_policy.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/audio_policy.stub.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/bluetooth.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/bootctrl.mt8167.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/gralloc.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/gralloc.mt8167.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/keystore.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/local_time.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/hw/power.default.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/libACL.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libAVSSystem.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libAccountUtils.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libAcdLocalFileUtil.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libAcdLocalJsonUtil.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libAcdLocalLoggerUtil.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libAlexa.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libBanyanOutreach.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libCapabilityLibrary.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libCertifiedSender.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libCpp14Support.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libDAVSUtils.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libDemoCommon.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libDeviceSettings.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libEndpoints.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libLemixerPlaybackDelegate.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libMediatorManager.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libMetricRecorder.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libReggaeDevice.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libReggaePlayer.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libRegistrationManager.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libRegistrationManagerInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libSQLiteStorage.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libSetupCommonCore.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libSmartHomeConsentManager.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libSmartHomeTestUtils.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libSmartHomeUtils.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libUserPerceviedFatalsOutOfProcessClient.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkAgentManagerInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkAlexaEventProcessedNotifierInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkAssetManagerClient.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkAssetManagerClientInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkAssetsInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkCommunicationInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkMultiAgentUtilities.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkNotifier.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkPostConnectOperationProviderRegistrarInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkShutdownManagerInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libacsdkTimeSequenceBuilderInterfaces.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libaipcconnector.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libamdclient.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libdiskconfig.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/libdshsappliancedriver.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libext2fs.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/libiprouteutil.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/libnetlink.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/liborpheusaudiomanager.so	lib	keep	REQUIRED: linked by audio_manager_get_prop/set_prop, which hassmic runs for the mixer's volumes
+lib/liborpheusaudioutils.so	lib	keep	REQUIRED: linked by audio_manager_get_prop/set_prop, which hassmic runs for the mixer's volumes
+lib/libpcrecpp.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+lib/libpuffindshsutils.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libshsconnector.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libshsutils.so	lib	remove	Alexa / Amazon client stack (AVS, skills, smart home, accounts, registration, media delegates)
+lib/libvulkan.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+lib/modules/btmtksdio.ko	lib	keep	kernel module loaded by init (Wi-Fi/Bluetooth driver): not 'unused', it is the radio
+lib/modules/wlan_mt76x8_sdio.ko	lib	keep	kernel module loaded by init (Wi-Fi/Bluetooth driver): not 'unused', it is the radio
+lib/modules/wlan_mt76x8_sdio_prealloc.ko	lib	keep	kernel module loaded by init (Wi-Fi/Bluetooth driver): not 'unused', it is the radio
+lib/soundfx/libbundlewrapper.so	lib	keep	Android audio effect plug-in (named in audio_effects.conf)
+lib/soundfx/libeffectproxy.so	lib	keep	Android audio effect plug-in (named in audio_effects.conf)
+lib/soundfx/libldnhncr.so	lib	keep	Android audio effect plug-in (named in audio_effects.conf)
+lib/soundfx/libreverbwrapper.so	lib	keep	Android audio effect plug-in (named in audio_effects.conf)
+lib/soundfx/libvisualizer.so	lib	keep	Android audio effect plug-in (named in audio_effects.conf)
+vendor/lib/hw/gatekeeper.mt8167.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+vendor/lib/hw/lights.mt8167.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+vendor/lib/hw/sensors.mt8167.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+vendor/lib/libMtkOmxCore.so	lib	keep	Android hardware module (HAL), loaded by name at run time
+vendor/lib/libadaptersdk.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libaed.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libblisrc.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libbstring.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libbwc.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libcloudtunnel-client.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libcore-client.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libcoreroutine.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libcorewatch-protocol.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libcorewatch.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libdirect-coredump.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libdoctypes.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libfeatureconfig.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libgwlog.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libhalo-proto.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libhubcoredb-upseeder.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libhubcoredb.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libhwm.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libmiraclemax.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libmmprofile.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libmrdump.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libmtcloader.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libratconfig.so	lib	keep	platform helper library (file systems, netlink, resampler, MediaTek helpers)
+vendor/lib/libremote.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libsedes-docs.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libsysev.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libterservice.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/libudf.so	lib	remove	Sidewalk / hub core (vendor): cloud tunnel, hub database, core watch
+vendor/lib/mediadrm/libdrmclearkeyplugin.so	lib	keep	Android hardware module (HAL), loaded by name at run time

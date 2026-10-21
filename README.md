@@ -188,12 +188,41 @@ Open issues and measurements: [PLAN.md](PLAN.md).
 - **For now**: `adb shell rm /data/local/hassmic/hassmic.conf`, reboot. A stock, unregistered Echo, which updates itself
   if it gets internet.
 - **For good**: `scripts/install-system.sh --uninstall`.
+- **Amazon's services back** (donut): `scripts/debloat.sh revert` and a reboot, as long as the moved files were not deleted for good;
+  after that only the backup the setup made ([docs/cloud-free.md](docs/cloud-free.md#recovery)).
 - **All of it**: reflash the stock firmware from TWRP, step 1 of the model's page.
 - **Start over** but keep the install: [factory reset](docs/GUIDE.md#factory-reset) (hold the action button 10 s).
 
+## This fork: Amazon removed, not only blocked
+
+Upstream stops Amazon's programs at every start and blocks them in the firewall; the files stay on the Echo and init still
+starts them first. **This fork deletes them** (Echo Dot 3 / `donut` so far): Alexa's client, the cloud, telemetry,
+Sidewalk, Amazon's remote-diagnostics channel (Diode), account and setup services, firmware updates, performance
+monitoring and the factory-reset daemon, with every init definition and start-up call that pointed at them. What is left
+is the audio engine and wake word, the light ring, the buttons, power and Wi-Fi.
+
+| on a Dot 3, cold boot | upstream | this fork |
+|---|---|---|
+| init services running | 44 (init starts more; the scripts stop those after it has) | 27, none Amazon cloud |
+| Amazon services with cloud features running | 16 | 0 |
+| `/system` used | 235 MB | 139 MB |
+| `MemAvailable` | 357 MB | 385 MB |
+| packets that reach the firewall's final drop rule | 0 | 0 |
+
+Every Amazon daemon that is left lacks Android's `inet` group, so the kernel refuses it an internet socket
+(`socket: Permission denied`, tested), whatever libraries it has loaded.
+
+The guided setup has two more steps for it, **Back up the Echo** (2.2 GB, verified) and **Remove Amazon's services**
+(moves the files, reboots, checks the microphone and asks for the wake word; deleting the moved files for good is a
+separate question that defaults to no). You lose Alexa, "Download from Amazon" (wake words are the ones on the Echo) and
+Amazon's stock factory reset. What was removed and why, what stays, the traps (the mixer waits 20 s on a service that is
+gone unless a stand-in library is installed), recovery and how to port it:
+**[docs/cloud-free.md](docs/cloud-free.md)**.
+
 ## Security
 
-No cloud: the firewall lets Amazon's programs reach only your local network, and firmware updates never get out. The
+No cloud: the firewall lets Amazon's programs reach only your local network, and firmware updates never get out (in this fork
+they are not on the Echo at all, see above). The
 link to Home Assistant is encrypted with a key Home Assistant sets; until you add the Echo, anyone on the network can connect.
 The settings page lets in only browsers you approved with the action button. adb is closed over Wi-Fi. Updates
 install only with a valid signature. The whole model, including what it does not protect against:

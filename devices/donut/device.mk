@@ -17,3 +17,8 @@ KCC_URL     := https://android.googlesource.com/platform/prebuilts/gcc/linux-x86
 KCC_DIGEST  := 6465e57d85ac645a5ebe5fe0537dc3f868f85ea6bbd8d7e1d0de06b349168067
 KFRAG   := devices/donut/kconfig
 KCFLAGS := -fno-pic                 # Android's GCC builds PIC by default; modules use -mcmodel=large, which refuses it
+
+# scripts/debloat.sh (the guided setup's "Remove Amazon's services" step) takes perfmonitord away; the mixer still calls three
+# functions of its client library, which would hang it for 20 s each.  Build the stand-in (src/stubs/perf_stub.c).
+PERF_STUB := 1
+

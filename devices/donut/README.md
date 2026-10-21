@@ -248,6 +248,24 @@ Home Assistant must reach TCP 26053 on the Echo; the Echo must reach Home Assist
 without Home Assistant (`scripts/adb-wifi.sh <echo-ip>`: 30 minutes; adb over Wi-Fi is closed otherwise, see
 [adb over Wi-Fi](../../docs/GUIDE.md#adb-over-wi-fi)). The USB wires can come off now.
 
+### 5a. Back up, then remove Amazon's services (the setup's steps "Back up the Echo" and "Remove Amazon's services")
+
+Optional, and not what upstream does: upstream leaves Amazon's software on the Echo, stopped and blocked. This deletes it. What
+exactly, what stays and what you lose: [docs/cloud-free.md](../../docs/cloud-free.md). Done with an Echo that already runs hassmic,
+over adb (`scripts/adb-wifi.sh <echo-ip>`; with more than one Echo set `ANDROID_SERIAL=<echo-ip>:5555`):
+
+```sh
+scripts/backup.sh            # 2.2 GB, 30-60 min over Wi-Fi, resumable; checks every partition against sha1sum on the Echo
+scripts/debloat.sh apply     # moves Amazon's files into /system/.debloat on the running slot (-n shows first)
+adb reboot                   # reopen adb after the boot: scripts/adb-wifi.sh <echo-ip>
+scripts/debloat.sh verify    # needed daemons up, removed ones gone, the microphone delivers audio
+```
+
+Say the wake word, press the action button, the volume keys and the mute switch. If something is wrong: `scripts/debloat.sh revert`
+and reboot. When it is right, `scripts/debloat.sh purge` deletes the moved files for good (about 70 MB; after that only the backup brings
+them back, so keep the backup folder, `persist` in it is the Echo's own key and cannot be made again). Do the backup, and solder
+the USB wires before experimenting if you cannot rule out needing recovery: adb over Wi-Fi depends on the services that stay.
+
 ### 6. Optional: Music Assistant
 
 Music Assistant finds the Echo by itself (Sendspin player, TCP 28928); to play on it, pair it with the Echo's token.

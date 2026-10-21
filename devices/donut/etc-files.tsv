@@ -1,0 +1,165 @@
+# /system/etc entries on the cleaned Dot 3 (2026-10-21), classified by what each file is: remove = configuration of Amazon software that is gone,
+# unclear = test first, keep = the rest.  'Not named by any file' does NOT mean unused (the audio policy and volume tables are read through paths built at run time).
+# entry<TAB>class<TAB>bytes<TAB>why.  Nothing has been removed from this list yet.
+.tp	keep	987	audio, ring, buttons, power, radio, certificates, init files, or platform
+AlexaClientSDKConfig.json	remove	3328	Alexa client configuration
+AssetmgrdMinervaConfig.json	remove	2727	metrics schema of assetmgrd (removed)
+BLECapabilityConfig.json	remove	485	BLE smart-home capability
+BLEMeshCapabilityConfig.json	remove	377	BLE mesh capability
+BLEMeshConfig.json	remove	87	BLE mesh configuration
+CHIPAllowLists.json	remove	21	Matter (CHIP) lists
+CHIPCapabilityConfig.json	remove	2449	Matter capability
+CHIPClusterToAlexaCapabilityMapping.json	remove	3620	Matter to Alexa capability map
+CHIPSupportedDeviceTypesConfig.json	remove	144	Matter device types
+CIDDB.dat	remove	77272	BLE mesh company-ID database
+CrossoverFrequencyTuning.v1.json	keep	4088	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v10.json	keep	15176	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v11.json	keep	15176	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v12.json	keep	17443	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v13.json	keep	20547	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v14.json	keep	23051	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v15.json	keep	21545	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v16	keep	25136	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v17.json	keep	26804	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v18.json	keep	26804	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v19.json	keep	27798	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v2.json	keep	4088	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v20.json	keep	27798	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v21.json	keep	28296	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v22.json	keep	28526	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v23.json	keep	29525	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v24.json	keep	29978	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v25.json	keep	30430	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v26.json	keep	31338	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v27.json	keep	33815	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v28.json	keep	34723	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v3.json	keep	6579	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v4.json	keep	7484	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v5.json	keep	11325	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v6.json	keep	11329	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v7.json	keep	11325	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v8.json	keep	11325	audio, ring, buttons, power, radio, certificates, init files, or platform
+CrossoverFrequencyTuning.v9.json	keep	15178	audio, ring, buttons, power, radio, certificates, init files, or platform
+DeviceDiscoveryCapability.json	remove	4943	smart-home device discovery
+LocalSkillsCapabilityConfig.json	remove	345	Alexa local skills
+NOTICE.html.gz	keep	125713	audio, ring, buttons, power, radio, certificates, init files, or platform
+OverlayAlexaClientSDKConfig.json	remove	837	Alexa client configuration (overlay)
+PuffinAppMinervaConfig.json	remove	78685	metrics config of the Alexa app, 76 kB; but named by libPuffinUtils, which every daemon loads: test -- decided: test; named inside libPuffinUtils, so every daemon's log is checked after the removal
+VolumeCurves.xml	keep	1450	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v1.json	keep	4539	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v10.json	keep	20924	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v11.json	keep	21020	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v12.json	keep	24286	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v13.json	keep	28566	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v14.json	keep	32117	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v15.json	keep	29590	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v16	keep	40461	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v17.json	keep	38127	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v18.json	keep	38127	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v19.json	keep	39150	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v2.json	keep	4533	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v20.json	keep	39129	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v21.json	keep	39731	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v22.json	keep	39988	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v23.json	keep	41242	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v24.json	keep	41920	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v25.json	keep	42598	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v26.json	keep	41778	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v27.json	keep	45361	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v28.json	keep	46499	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v3.json	keep	7110	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v4.json	keep	8122	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v5.json	keep	16123	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v6.json	keep	16009	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v7.json	keep	15924	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v8.json	keep	15783	audio, ring, buttons, power, radio, certificates, init files, or platform
+VolumeGainTuning.v9.json	keep	21194	audio, ring, buttons, power, radio, certificates, init files, or platform
+WifiCapabilityConfig.json	remove	1220	smart-home Wi-Fi capability (Philips Hue and others)
+a2dp_audio_policy_configuration.xml	keep	2220	audio, ring, buttons, power, radio, certificates, init files, or platform
+acebutton_config.json	keep	1660	audio, ring, buttons, power, radio, certificates, init files, or platform
+adb_cd.sh	keep	276	Amazon's adb policy script (closes adb on release builds); local, stays
+ahe	remove	4464	Alexa Hybrid Execution data
+ahe.config.json	remove	4456	Alexa Hybrid Execution configuration (names the ahe skill libraries)
+ahe.version	remove	32	Alexa Hybrid Execution version
+alexa_endpoint_host_names.json	remove	3581	list of Amazon Alexa endpoint host names
+alsa.conf	keep	9318	audio, ring, buttons, power, radio, certificates, init files, or platform
+apns-conf.xml	keep	312709	audio, ring, buttons, power, radio, certificates, init files, or platform
+arcusDefaultConfig.json	remove	42	Arcus (Amazon device cloud) defaults
+audio_effects.conf	keep	5491	audio, ring, buttons, power, radio, certificates, init files, or platform
+audio_policy_configuration.xml	keep	8984	audio, ring, buttons, power, radio, certificates, init files, or platform
+audio_policy_volumes.xml	keep	10439	audio, ring, buttons, power, radio, certificates, init files, or platform
+avahi-daemon.conf	keep	1747	audio, ring, buttons, power, radio, certificates, init files, or platform
+bluetooth	keep	2104	audio, ring, buttons, power, radio, certificates, init files, or platform
+brightness.json	remove	657	smart-home capability definition (Alexa)
+capabilities.json	remove	2552	smart-home capability list
+cards	keep	1405	audio, ring, buttons, power, radio, certificates, init files, or platform
+clusters.json	remove	2463	Matter clusters
+color.json	remove	446	smart-home capability definition (Alexa)
+colorTemperature.json	remove	934	smart-home capability definition (Alexa)
+contactSensor.json	remove	298	smart-home capability definition (Alexa)
+dac_policy.json	remove	10169	dacd (removed) policy
+dbus.conf	keep	932	audio, ring, buttons, power, radio, certificates, init files, or platform
+defaultDemoContent.mp3	remove	1088768	retail demo content, 1 MB
+default_volume_tables.xml	keep	2617	audio, ring, buttons, power, radio, certificates, init files, or platform
+dhcpcd	keep	8498	audio, ring, buttons, power, radio, certificates, init files, or platform
+dnsmasq.conf	keep	2427	audio, ring, buttons, power, radio, certificates, init files, or platform
+endpointHealth.json	remove	2115	smart-home endpoint health
+event-log-tags	keep	20264	audio, ring, buttons, power, radio, certificates, init files, or platform
+fdrw_default.conf	keep	42	audio, ring, buttons, power, radio, certificates, init files, or platform
+fmonitor_config.json	remove	32031	fmonitor (removed) configuration, 31 kB
+fs_config_dirs	keep	96	audio, ring, buttons, power, radio, certificates, init files, or platform
+fs_config_files	keep	400	audio, ring, buttons, power, radio, certificates, init files, or platform
+hosts	keep	56	audio, ring, buttons, power, radio, certificates, init files, or platform
+humiditySensor.json	remove	303	smart-home capability definition (Alexa)
+hybrid_router_config.json	remove	138	Alexa hybrid router
+images.json	remove	6218	Zigbee image table (smart home)
+init	keep	19081	audio, ring, buttons, power, radio, certificates, init files, or platform
+keyboards	keep	49644	audio, ring, buttons, power, radio, certificates, init files, or platform
+led-resources	keep	1032682	audio, ring, buttons, power, radio, certificates, init files, or platform
+led_mute_ring_config.json	keep	11349	audio, ring, buttons, power, radio, certificates, init files, or platform
+ledlipcconfig.json	keep	385	audio, ring, buttons, power, radio, certificates, init files, or platform
+lightSensor.json	remove	818	smart-home capability definition (Alexa)
+locale_to_available_wakewords_map.json	keep	5572	audio, ring, buttons, power, radio, certificates, init files, or platform
+lock.json	remove	947	smart-home capability definition (Alexa)
+media_codecs.xml	keep	3503	audio, ring, buttons, power, radio, certificates, init files, or platform
+media_codecs_google_audio.xml	keep	5111	audio, ring, buttons, power, radio, certificates, init files, or platform
+media_codecs_google_video_le.xml	keep	5475	audio, ring, buttons, power, radio, certificates, init files, or platform
+media_codecs_mediatek_audio.xml	keep	5634	audio, ring, buttons, power, radio, certificates, init files, or platform
+media_codecs_mediatek_video.xml	keep	8350	audio, ring, buttons, power, radio, certificates, init files, or platform
+media_codecs_performance.xml	keep	9401	audio, ring, buttons, power, radio, certificates, init files, or platform
+media_profiles.xml	keep	16325	audio, ring, buttons, power, radio, certificates, init files, or platform
+mkshrc	keep	495	audio, ring, buttons, power, radio, certificates, init files, or platform
+mode.json	remove	258	smart-home capability definition (Alexa)
+motionSensor.json	remove	1962	smart-home capability definition (Alexa)
+nsmgr	keep	353	audio, ring, buttons, power, radio, certificates, init files, or platform
+oobe_allowed_origins.json	remove	476	out-of-box setup allowed origins
+ota-update.conf	remove	257	Amazon update engine timing
+permissions	keep	37722	audio, ring, buttons, power, radio, certificates, init files, or platform
+pfm.endpoints.map.json	remove	2742	Amazon endpoint map per region (DAVS, ...)
+power.json	remove	1424	smart-home capability definition (Alexa)
+preloaded-classes	keep	152297	audio, ring, buttons, power, radio, certificates, init files, or platform
+provisionerd_default_arcus_config.json	remove	2258	provisioning (Arcus) defaults
+public.libraries.txt	keep	251	audio, ring, buttons, power, radio, certificates, init files, or platform
+pwrsvc_config.json	keep	2325	audio, ring, buttons, power, radio, certificates, init files, or platform
+r_submix_audio_policy_configuration.xml	keep	2105	audio, ring, buttons, power, radio, certificates, init files, or platform
+range.json	remove	260	smart-home capability definition (Alexa)
+registration_endpoint_host_names.csv	remove	5578	Amazon registration host names (read by p2p_dnsmasq.sh, a setup-mode script)
+registration_endpoint_host_names.json	remove	8186	Amazon registration host names
+security	keep	1743573	audio, ring, buttons, power, radio, certificates, init files, or platform
+shs.config.json	remove	1380	smart-home skill service configuration
+skills	remove	395599	Alexa skill packages (7 files, 400 kB)
+smartHomeSkill	remove	12288	smart-home skill data
+softhsm2.conf	keep	116	audio, ring, buttons, power, radio, certificates, init files, or platform
+spn-conf.xml	keep	53032	audio, ring, buttons, power, radio, certificates, init files, or platform
+statusCode.json	remove	216	Alexa.StatusCodeController definition
+supported.cor.json	remove	121	supported countries of residence for Alexa
+temperatureSensor.json	remove	660	smart-home capability definition (Alexa)
+thermostat.json	remove	4847	smart-home capability definition (Alexa)
+toggle.json	remove	262	smart-home capability definition (Alexa)
+transcription_config.json	remove	13785	Alexa transcription rules
+udss	remove	30795	UDSS 'camp' artifacts and configs (removed UdssCampSvc); named by libPuffinUtils and aceinputmanager: test -- decided: 'udss' in aceinputmanager is the string com.amazon.udss, 'whad' matched init.whad_cc.rc; their consumers are gone
+update_engine	remove	451	Amazon update payload public key
+usb_audio_policy_configuration.xml	keep	1936	audio, ring, buttons, power, radio, certificates, init files, or platform
+uxconfig.json	remove	34684	UX events to ring animations ('crumpet UX config'); read by the removed uxeventd, maybe by nothing now: test -- decided: named only by PuffinApp and the removed uxeventd
+whad	remove	36227	whole-home audio device database (btdevice.db.json, 36 kB); named by init.mt8516.rc: test -- decided: 'udss' in aceinputmanager is the string com.amazon.udss, 'whad' matched init.whad_cc.rc; their consumers are gone
+wifi	keep	612	audio, ring, buttons, power, radio, certificates, init files, or platform

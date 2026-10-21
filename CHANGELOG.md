@@ -2,6 +2,21 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-10-21
+
+- **Amazon's software can now be removed from the Echo Dot 3, not only stopped.** Until now Alexa's client, the cloud
+  services, telemetry, firmware updates and the rest stayed on the Echo, were started at every boot and stopped again by
+  the scripts, with the firewall as the second lock. The setup has two new steps for the Dot 3: **Back up the Echo** (the
+  whole flash, 2.2 GB, checked against the Echo itself; it holds the device's own keys, which cannot be made again) and
+  **Remove Amazon's services**: they, their start-up and their libraries are moved off the system partition, the Echo
+  reboots, and the setup checks that the microphone and the wake word still work before it offers to delete the moved files
+  for good (it asks; the default is no). What stays is the audio engine and wake word, the light ring, the buttons, power
+  and Wi-Fi: 27 services instead of 44, about 96 MB less on the system partition, 30 MB more free memory, and every Amazon
+  daemon that is left lacks the permission to open an internet socket (tested). You lose Alexa for good, "Download from
+  Amazon" (new wake words and models) and Amazon's own factory reset. Not for the other models yet.
+  Everything is in [docs/cloud-free.md](docs/cloud-free.md): what was removed and why, what stays, recovery, and how to do it
+  on another firmware. By hand: `scripts/backup.sh`, then `scripts/debloat.sh apply`, reboot, `scripts/debloat.sh verify`.
+
 ## 2026-10-19
 
 - **No more "Ja." when you pause after the wake word.** Since the Echo sends what you say right after the wake word,

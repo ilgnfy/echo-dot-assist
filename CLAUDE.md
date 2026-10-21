@@ -13,7 +13,7 @@ Docs: `README.md` (short user-facing overview with figures; every feature in det
 `docs/SECURITY.md`; figures are CeTZ sources in `docs/img/src/`, rendered light+dark by `tools/figures.sh`; install instructions per model in `devices/<codename>/README.md`, guided by
 `scripts/setup.sh`), `DEVELOPMENT.md` (architecture, layout, tests, contributing), `PLAN.md` (phases, open issues, every measurement), `CHANGELOG.md`
 (user-visible changes by date), `docs/` (reverse-engineering findings: `FINDINGS.md`, `re-platform.md`, `re-pryon.md`, `re-aed.md`, `re-whisper.md`, `re-a2dp-source.md`, `re-davs-login.md`,
-`sendspin-digest.md`).
+`sendspin-digest.md`, `cloud-free.md`: Amazon's services removed instead of stopped, results, recovery, porting).
 
 ## Build and test
 
@@ -383,6 +383,14 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   The PC side is `scripts/otatool.py` (stdlib only: keygen, pack/sign, verify/install, push, adb; same CLI), so the PC
   needs no compiler for it; `tests/otatool_test.sh` holds the two byte for byte to each other, and CI verifies every
   bundle with both. `scripts/bundle.sh` packs (ota-push.sh and CI).
+- **Cloud-free Dot 3** (`scripts/debloat.sh`, `scripts/backup.sh`, `devices/donut/debloat.list` + `debloat-files.list`, `scripts/lib/debloat_edit.py`,
+  `tools/debloat-analyze.py`, `src/stubs/perf_stub.c`, `devices/donut/prebuilt/`; wizard steps `backup` and `cloud` in `devices/donut/setup.sh`;
+  docs/cloud-free.md): Amazon's cloud services, their init definitions and the libraries nothing else reaches are moved into `/system/.debloat`
+  on the running slot, then optionally deleted (`purge`).  `/system/.debloated` makes `device.conf` empty the stock stop lists.  The mixer calls
+  three functions of `libperf_cpu_info_parser.so` when a mic stream opens; without `perfmonitord` each hangs 20 s (no wake word), so the library is
+  replaced by the stub (install by write-and-rename: a mapped library must not change in place, and a replaced one blocks `remount ro` until the
+  next boot).  Test every removal with a cold boot, the wake word and the buttons: a live `stop` does not show start-time dependencies.
+  `scripts/debloat.sh verify` is the check; `revert` undoes `apply` until `purge`.
 - **Prebuilt** (`scripts/lib/build.sh`, `build_binaries`): deploy/install-system/ota-push/setup take the device binaries
   from the release CI published of HEAD (tag `v<commit time>[-beta]` pointing at HEAD, clean tree; bundle verified
   against `keys/release.pub`, marked `build/<codename>/PREBUILT`) where there is no NDK, or with `PREBUILT=1`;

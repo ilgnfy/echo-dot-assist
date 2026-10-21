@@ -564,6 +564,19 @@ ESPHome devices and the Voice PE are:
 - Improv sends the Wi-Fi password over Bluetooth **unencrypted**: that is the protocol, the same for every Improv
   device. Not with `-B` (Bluetooth off) in `ARGS`.
 
+## Removing Amazon's software
+
+On the Echo Dot 3 the setup can delete Amazon's cloud services instead of leaving them stopped (step "Remove Amazon's services",
+or `scripts/debloat.sh`; [docs/cloud-free.md](cloud-free.md) says what goes, what stays and why). Afterwards:
+
+- Alexa cannot come back (`alexa-on.sh`, `MODE=stock-online`), and "Download from Amazon" on the settings page does not work: new wake words,
+  the sound-detection and whisper models come from Amazon's servers and need the services that are gone. The wake words already on the
+  Echo stay.
+- Amazon's stock factory reset is gone; the ones above (action button 10 s, Home Assistant, settings page) are hassmic's.
+- A small stand-in library replaces one of Amazon's (`libperf_cpu_info_parser.so`): the audio engine calls it when a microphone stream
+  opens, and without a stand-in it waits 20 s for a service that no longer exists and the wake word stops.
+- Take the backup (`scripts/backup.sh`), it is the only way back after `scripts/debloat.sh purge`.
+
 ## Factory reset
 
 At 5 s of holding the action button the ring warns: let go and nothing happens. Or "Factory reset" in Home Assistant
@@ -573,7 +586,8 @@ At 5 s of holding the action button the ring warns: let go and nothing happens. 
   Bluetooth pairings, Sendspin, microWakeWord models) and every saved Wi-Fi network. It starts as after the install:
   orange spinner, [setup from a phone](#setting-up-from-a-phone). Delete the device in Home Assistant and add it again.
 - **Kept**: the install, `hassmic.conf`, Amazon's extra models.
-- Do not hold past 20 s: Amazon's own button handler still runs and has a factory reset of its own at 21 s.
+- Do not hold past 20 s: Amazon's own button handler still runs and has a factory reset of its own at 21 s. (With Amazon's services
+  removed its reset daemon is gone, so holding on is probably harmless; that was not tried.)
 
 ## hassmic.conf
 

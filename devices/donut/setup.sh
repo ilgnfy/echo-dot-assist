@@ -23,12 +23,14 @@ root|Root
 build|Build
 network|Lock down, join Wi-Fi
 install|Install
+backup|Back up the Echo
+cloud|Remove Amazon's services
 "
 ROOTED_SKIP="udev usb unlock flash root"     # done on an Echo that is rooted already (scripts/setup.sh asks)
 NOTES=(
     "The USB wires can come off. adb over Wi-Fi is closed: scripts/adb-wifi.sh <echo-ip> (or debug access on the settings page, http://<echo-ip>:28931/) opens it for 30 min."
     "Updates: git pull, then scripts/ota-push.sh <echo-ip>."
-    "More wake words, whisper or sound detection models: the settings page, http://<echo-ip>:28931/ → \"Download from Amazon\"."
+    "More wake words, whisper or sound detection models: the settings page, http://<echo-ip>:28931/ → \"Download from Amazon\" (not once Amazon's services are removed: docs/cloud-free.md)."
     "Music Assistant, Bluetooth speaker: $DDIR/README.md"
 )
 
@@ -173,4 +175,57 @@ step_network() {
 step_install() {
     bootroot_unpack || return 1        # again: the build step may have been skipped
     install_satellite
+}
+
+# The two steps after the install.  The backup first: the removal moves Amazon's files out of the running system, and persist,
+# tee1/tee2, kb and dkb (the device's own keys) cannot be made again.  docs/cloud-free.md has the why and what.
+step_backup() {
+    wait_adb device || return 1
+    if ! ask "Back up the Echo's flash to this PC (2.2 GB, about 45 min over Wi-Fi; its keys cannot be made again)?" y; then
+        warn "no backup: persist, tee1/tee2, kb and dkb (the Echo's own keys) are not copied"
+        return 0
+    fi
+    BACKUP_DIR=device-logs/backup-$DEVICE-$(date +%Y%m%d-%H%M)
+    live "Backing up the Echo (stop it and run the setup again to go on)" scripts/backup.sh -o "$BACKUP_DIR" || return 1
+    printf 'BACKUP_DIR=%q\n' "$BACKUP_DIR" > $OUT/setup.backup
+    info "kept in $BACKUP_DIR (git-ignored; RESTORE.md in it says how to put it back)"
+}
+
+# the wake word was heard since the satellite started (hassmic logs "sound: wake")
+wake_heard() { adb shell cat /data/local/hassmic/boot.log | tr -d '\r' | awk '/^== satellite start/ { n = 0; next } /sound: wake/ { n++ } END { exit !n }'; }
+
+step_cloud() {
+    wait_adb device || return 1
+    say "Amazon's own software is still on the Echo: Alexa's client, its cloud services, telemetry and firmware updates."
+    say "They are stopped and blocked by the firewall, but the files and their start-up are still there."
+    say "This removes them from the system partition (and the start-up that calls them), leaving only what the satellite"
+    say "needs: the audio engine and wake word, the light ring, the buttons, Wi-Fi.  The other slot stays as it was."
+    if ! ask "Remove Amazon's cloud services from this Echo?" y; then
+        info "Kept. Later: scripts/debloat.sh apply (devices/donut/README.md)"
+        return 0
+    fi
+    [ -f $DDIR/prebuilt/libperf_cpu_info_parser.so ] || { fail "$DDIR/prebuilt/libperf_cpu_info_parser.so is missing"; return 1; }
+    if [ -f $OUT/setup.backup ]; then . $OUT/setup.backup; else
+        warn "there is no backup from this setup"
+        ask "Go on without one?" n || return 1
+    fi
+    task "Moving Amazon's services off the system partition" scripts/debloat.sh apply || return 1
+    task "Rebooting" adb reboot || return 1
+    [ -n "$DRY" ] || sleep 20
+    wait_adb device || return 1
+    waitfor "Waiting for the satellite to start|Satellite started" '[ -n "$(ashell pidof hassmic)" ]' "" 60 240 || return 1
+    # the mixer needs a minute before the microphone delivers: the check waits for it
+    waitfor "Waiting for the microphone|The microphone delivers" \
+        'scripts/debloat.sh verify | grep -q "verify: ok"' "" 30 180 ||
+        { [ -n "$DRY" ] || scripts/debloat.sh verify; fail "the Echo does not pass the check; put things back with: scripts/debloat.sh revert, then reboot"; return 1; }
+    if [ -z "$DRY" ]; then
+        tell "Say the wake word" "to see that the microphone path works (the log shows \"sound: wake\")."
+        waitfor "Listening for the wake word|Heard the wake word" wake_heard \
+            "Nothing heard yet: speak close to the Echo (s skips the check)" 45 300 || return 1
+    fi
+    if ask "Delete the moved files on the Echo for good (about 70 MB)?  Then only the backup brings them back." n; then
+        task "Deleting them" scripts/debloat.sh purge || return 1
+    else
+        info "Kept in /system/.debloat: scripts/debloat.sh revert puts everything back; scripts/debloat.sh purge deletes it."
+    fi
 }

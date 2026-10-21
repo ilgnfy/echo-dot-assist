@@ -7,10 +7,10 @@ setprop $ALEXA_PROP 0
 for s in $ALEXA_SERVICES $UPDATE_SERVICES $UPDATE_ONDEMAND; do stop $s; done
 # Amazon's Bluetooth stack (speaker mode, pairing through the Alexa app).  hassmic drives the radio itself, for Home
 # Assistant's Bluetooth proxy and as a Bluetooth speaker, and /dev/stpbt does not keep a second user out: it has to go.
-stop $BT_SERVICE
+[ -n "$BT_SERVICE" ] && stop $BT_SERVICE
 # Its AIPC service directory outlives it and stays its own (0710): hassmic answers the mixer on that service in its place
 # when it plays to a Bluetooth speaker (btout.c) and could neither remove nor reuse it.
-i=0; while [ "$(getprop init.svc.$BT_SERVICE)" = running ] && [ $i -lt 20 ]; do sleep 0.25; i=$((i + 1)); done
+i=0; while [ -n "$BT_SERVICE" ] && [ "$(getprop init.svc.$BT_SERVICE)" = running ] && [ $i -lt 20 ]; do sleep 0.25; i=$((i + 1)); done
 rm -rf /dev/aipc/0
 # Setup mode (unregistered device): oobed advertises for the Alexa app and keeps the orange setup animation on the ring.
 for s in $SETUP_SERVICES; do stop $s; done

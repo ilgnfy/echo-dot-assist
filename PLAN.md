@@ -2159,3 +2159,132 @@ Run in this order. Each step says what it proves.
       state/volume.music is read at start only while state/config says separate_volumes=on (`settings_peek`, now the
       last line of a name as loading takes it), else deleted: a hand edit or an older build after a fallback left it
       behind and the volume came back from it.
+
+## Phase 6 — Amazon's services removed, not only stopped **(device)**
+
+Goal: nothing of Amazon's that can reach a cloud stays on the Dot 3's system partition or in its start-up; what is left is the audio
+engine, the light ring, the buttons, power and Wi-Fi.  Method, results and traps: [docs/cloud-free.md](docs/cloud-free.md).  Done on one Dot 3 on
+2026-10-21; slot A only, slot B untouched.
+
+- [x] Backup first: `scripts/backup.sh` (resumable 32 MiB pieces, adb over Wi-Fi closes after 30 min and the script opens it again;
+      every partition but userdata, 17 images, 2192 MiB, + a tar of /data; each image compared with `sha1sum` run on the Echo, which has no
+      `sha256sum`).  Two things found on the way: toybox `tar` writes "removing leading '/'..." into the stream (39 bytes, cut off), and a
+      copy is only a backup once the hashes match.  Tested again against the manual dump: byte-identical.
+- [x] Inventory: 229 service definitions in the init files (root `init*.rc`, `/system/etc/init`, `/vendor/etc/init`); 81 are MediaTek's with no
+      binary on this firmware.  44 init services ran after a normal boot.  Live `stop` of 16 cloud-facing ones one at a time (20 s, then mixer, ring,
+      buttons, HA link): nothing changed.  **That test missed one dependency** (below).
+- [x] Phase 1 (init only): 34 per-daemon `.rc` files moved to `/system/.debloat`, service blocks cut from `init.mt8516.rc`, `init.project.rc`,
+      `init.ace.rc`, `init.whad_cc.rc`, `init.oobe.puffin.rc`; cold boot: 31 services, DROP counter 0, wake word, buttons, music fine.
+- [x] Phase 2 (files): 66 executables, 214 libraries, 3 Neo apps, perf configs and modules moved; cold boot **broke the microphone**
+      (`micAsr delivers nothing (status 110)` over and over, no wake word, a press on the button heard nothing).  Cause, from logcat and the
+      disassembly: the mixer calls `perfmonitord_initConnection` (AIPC service 182) when a mic stream opens and waits 20 s per attempt for a
+      daemon that was gone.  Restoring the perf stack fixed it.  `lockdown.sh` had already noted the same thing.
+- [x] Fix: `src/stubs/perf_stub.c` (three functions returning 1/1/void, 1740 bytes, no dependencies, built with Apple clang + lld; the Makefile
+      builds it with the NDK for models with `PERF_STUB`), installed over the stock `libperf_cpu_info_parser.so` by write-beside-and-rename.
+      The disassembly gave the return convention (1 = done) and that only `mixer` and `PuffinApp` import the three; patching three PLT entries in
+      `bin/mixer` would also have worked and was rejected because `bin/mixer` is hash-pinned in `probe.md5`.  Then `perfmonitord`, `perfhald`,
+      `perfrecoveryd` and `perfinfo.ko`/`perf_cpu_info.ko` went; cold boot fine, 0 stalls.
+- [x] Start-up text: `exec ... csm2puffin.sh` (not on the firmware), `start csm2puf_rollback` (no such service), 60 lines of `start`/`stop`/`import`
+      and `/data` folder set-up for removed services deleted; `device.conf` stop lists emptied through `/system/.debloated`; `alexa-off.sh` and
+      `run.sh` guarded against an empty service name (`stop` with no argument stops the framework).
+- [x] Audit of what runs: 27 init services + avahi (28 before `ace_sensorsd` went).  Open internet sockets: only `hassmic`, `adbd`, `avahi-daemon`, `dhcpcd`, `wpa_supplicant`.
+      Android's paranoid networking: as user `audio` `toybox nc` fails with `socket: Permission denied`, as a user in group `inet` it connects.
+      The one Amazon daemon with that group *and* cloud-capable libraries mapped was `factory-reset` (its client was the removed Neo app): removed.
+      17 files with Amazon host names remain on disk (e.g. `libace_connectivity_manager.so`, ten AWS IoT names), mapped by ledcontroller,
+      acebuttond, aceinputmanager, mixer and pwrsvcd as dependencies of shared base libraries (which one pulls them in was not traced); they cannot be
+      removed without breaking those daemons and cannot connect.
+- [x] Neo (`neo-init`, `neo-service-coordinator`): Amazon's Rust service framework; its three apps are the credential manager (cloud
+      rotation), **Diode** (remote diagnostics/commands: `aceDiode_executeActionAsync`, `handleCommandString`, `deepFactoryReset`, a
+      network-diagnostics job every 5 min, "d2cs ... s2dm" cloud messages) and the stock factory reset.  Only `dacd` (Alexa) linked it besides.
+- [x] Measured (cold boot, HA connected): init services 44 → 27; `MemAvailable` 357 → 385-388 MB; `/system` used 235 268 → 162 236 kB after
+      the first purge, 138 756 kB after the last (-96.5 MB, the later passes purged by the owner); load average about 7 → 4-5; ESPHome port answers after about 50 s; the firewall's final DROP counter 0 before and after.
+- [x] Tools: `scripts/debloat.sh` (`apply`, `revert`, `status`, `verify`, `purge`, `-n`), `scripts/lib/debloat_edit.py` (+ `tests/unit/debloat_edit_test.py`,
+      `make unit-debloat_edit`), `tools/debloat-analyze.py` (reproduces the file list from the firmware; it found 15 more libraries after
+      `factory-reset` went, which the first run could not know), `devices/donut/debloat.list`, `debloat-files.list`.
+      Found on the way: `otatool remount ro` answers "busy" after a mapped library was replaced (its old inode is `(deleted)` in
+      `/proc/<pid>/maps`); `install` therefore skips identical files.
+- [x] Guided setup: steps "Back up the Echo" and "Remove Amazon's services" (`devices/donut/setup.sh`); the removal asks, moves, reboots, runs
+      `debloat.sh verify`, waits for the wake word ("sound: wake" in the log) and asks separately whether to purge (default no).  Dry-run of both
+      steps tested; the whole wizard runs on Linux only (the unlock), so it was not walked end to end on the Mac.
+- [x] Purge of the last batches (factory-reset, 15 libraries) run by the owner: `/system` used 162 264 → 160 640 kB; `verify` ok afterwards.  After the second and third pass: purged again, 160 688 → 138 756 kB.
+- [x] The seven ACE/MediaTek daemons identified (libraries, who maps their client libraries, logs); `ace_sensorsd` (no client) removed and cold-boot tested, the light sensor reads the same through sysfs.
+- [ ] Cold-boot removal tests of `ace_thermald`, `kisd` (no client, kept for hardware and key safety), `shmd`, `pwrsvcd`, `ace_powerd`, `ace_eventmgr` (all have clients; expected to fail like `perfmonitord` did) - not planned.
+- [x] Second pass (2026-10-21): 31 Amazon executables, 68 libraries, 3 init files moved; cold boot, `verify` ok, 27 services, `audio_manager_get_prop` still answers (50/50), `lipc-*-prop` load.
+      A check before applying caught that `audio_manager_get_prop/set_prop` and `lipc-get-prop/set-prop` are run by hassmic (`main.c`, `btout.c`) and had been filed as optional tools,
+      and that `liborpheusaudiomanager/utils` (which they link) were on the remove list; 2 of the 70 libraries therefore stayed.  The first reading of "dormant" also missed programs that
+      are only started on demand, the radio kernel modules and the hardware modules (see docs/cloud-free.md).
+- [x] After it: 2164 files under /system (24 running executables, 200 loaded, 9 run on demand, 252 reachable by name, 117 executables and 47 libraries not reached, 1515 in etc and elsewhere); 13 files
+      with Amazon host names (4 loaded as dependencies, no `inet` group; 9 only named by other libraries).  /etc: 103 keep, 54 remove, 5 test (`devices/donut/etc-files.tsv`).
+- [x] Third pass (2026-10-21): 58 /etc entries (~1.8 MB) and 9 Amazon libraries.  First analysed: the nine are named by no loaded file (5 by no file at all, only kept "reachable" by the
+      run-time pattern `lib%s_%s.so`; 4 by unloaded libraries of removed services); of the 59 /etc entries marked remove/unclear only 5 looked alive and all 5 were false matches (the string
+      `com.amazon.udss`, `init.whad_cc.rc`, the substring "ahe", the service name `update_engine`) except `PuffinAppMinervaConfig.json`, named in the always-loaded `libPuffinUtils`.
+      Cold boot: `verify` ok, 27 services, volumes readable, and a search of 9643 log lines (logcat, dmesg, hassmic) for the 67 names found no complaint.  2076 files left under /system,
+      6 with Amazon host names (4 loaded libraries without network permission, `apns-conf.xml` a Brazilian carrier, `dnsmasq.conf` setup-mode DNS).
+- [ ] Fourth pass: setup-mode DNS leftovers (dnsmasq, dnsmasq.conf, p2p_dnsmasq.sh), `fr_service`, `bootstat.rc`.
+- [ ] The same for `biscuit` and `radar` (different init files; the stub is probably the same library, check `readelf` of theirs).
+- [ ] hassmic's own dead code for what is gone: `davs.c`, `dha.c`, the settings page's "Download from Amazon", `alexa-on.sh`.
+- [ ] CI: build the stub with the NDK and compare its exports with the committed one.
+
+## To do (not started)
+
+### AirPlay 2 receiver (shairport-sync), next to the media player and the Bluetooth speaker
+
+Analysis of 2026-10-21; nothing built.  Sources: shairport-sync's AIRPLAY2.md and BUILD.md, nqptp's README (fetched that day, their wording summarised),
+the device and the repo.  Things marked *check* are from memory or inferred and need a test before anyone relies on them.
+
+**Does it fit the audio design?  Yes, as one more music source.**  `audio.h` has `music_open/music_write/music_queued_us` (a mixer stream of its own,
+mixed with voice, which Sendspin uses) and `bt_*` (the A2DP sink); `main.c` `core_music(MUSIC_*, on)` makes the newest source win
+(a Bluetooth device that starts pauses Sendspin and the other way round, line 1609 on).  AirPlay would be `MUSIC_AIRPLAY = 4` feeding
+`music_*`, pausing the others when it starts.  What follows from that without new code: the voice assistant ducks and answers over it as over
+Sendspin; the music volume (and the separate-volumes settings, `audio_music_gain`) applies; "<wake word>, stop" pauses it
+(`stop_word`); and playing on a Bluetooth speaker works because the choice between the Echo's speaker and a Bluetooth speaker is made behind
+the music stream (`btout.c`, `core_speaker`), not by the source.  HA's media-player `play_media` stays as it is (it is music on the TTS
+stream).  Not free: the media-player entity would have to show AirPlay as a source (state/title), and the one-source-at-a-time rule must
+include it.
+
+**Environment on the Echo** (measured): MT8167B, quad Cortex-A35 (kernel aarch64 4.4.22, userland 32-bit armv7, bionic/API 24); 483 MB RAM
+with 385 MB available and 363 MB zram swap; `/system` 837 MB free, `/data` 1.4 GB free (space is not the limit, RAM is: hassmic ~29 MB, mixer ~23 MB).
+Firmware libraries present: `libavcodec`, `libavformat`, `libavutil`, `libswresample` (FFmpeg; the A2DP sink already loads its AAC decoder
+with dlopen), `libssl`/`libcrypto`, `libmbedtls`/`libmbedcrypto`, `libopus`, `libz`, `libsodium` and `libuuid` (in `/system/vendor/lib`),
+`libspeexresampler`, `libavahi-common`/`-core`.  Missing: `libplist`, `libgcrypt`, `libconfig`, `libpopt`, `libsoxr`, and **`libavahi-client`, which the
+cleanup deleted** (nothing on the Echo used it; restore it from the backup or build avahi's client library).  `/dev/shm` does not exist; bionic has no `shm_open` (*check*).
+
+**What shairport-sync needs for AirPlay 2** (BUILD.md): build tools plus `libpopt`, `libconfig`, `libssl` (OpenSSL), `libsoxr`, `libplist`,
+`libsodium`, `libgcrypt`, `uuid`, `xxd`, FFmpeg's `libavutil/avcodec/avformat` with an AAC decoder that handles `fltp`, `libavahi-client` and a
+running `avahi-daemon`; `./configure --with-airplay-2 --with-ssl=openssl --with-avahi ...`; plus **NQPTP**, a second daemon for timing/sync that needs
+exclusive use of **UDP 319 and 320** and a POSIX shared-memory interface to shairport-sync.  Formats: S16/S24/F24 PCM, ALAC and AAC, 44.1 and 48 kHz,
+stereo (and 5.1/7.1).  AirPlay (classic) without AirPlay 2 needs neither NQPTP nor the PTP ports; it has no multi-room sync.
+
+**Hard problems, in order of size**
+1. **The firewall.** The INPUT policy admits only 16384-32767 (+ 5353, 2330 in kiosk mode).  319/320 are outside and also below 1024: NQPTP must run as
+   root, `lockdown.sh` needs rules for them (from private addresses only) and `docs/SECURITY.md` a paragraph.  Same for the RTSP port and the
+   UDP ports shairport-sync opens per session (configurable ranges; keep them inside 16384-32767).
+2. **Pairing/security.** AirPlay's default pairing is open to the LAN; use a password or HomeKit-style pairing and say so in the settings page.  A new
+   inbound service widens the attack surface that upstream's design keeps small.
+3. **NQPTP on bionic**: shared memory without `/dev/shm`/`shm_open` (ashmem or a file in `/dev/` instead, a patch to both daemons), raw timestamps.
+4. **mDNS**: `_airplay._tcp` and `_raop._tcp` records with changing TXT fields.  Either restore `libavahi-client` and let shairport talk to
+   `avahi-daemon` over D-Bus (dbus-daemon runs), or have hassmic write the service files itself as it does for ESPHome and restart avahi.
+5. **Output and latency.** The `pipe`/`stdout` backends are "for where timing is not crucial"; multi-room sync wants the latency of the output.  A small
+   backend of our own (a Unix socket into hassmic, reporting `music_queued_us` plus the mixer's latency) is the clean way; hassmic converts 44.1/48 kHz
+   to the stream's rate (the music stream takes the rate it is opened with).
+6. **RAM and CPU**: not measured.  An A35 decodes ALAC/AAC easily; the footprint of shairport-sync + nqptp + the FFmpeg decoder (shared, from the
+   firmware) is probably 10-20 MB (*guess*).
+
+**Building it from source for compatibility and small size** (the project's way: NDK r21e, armv7, API 24, bionic, linking the firmware's libraries)
+- Cross-build the missing libraries static, `-Os -flto`, only what is used: `libplist`, `libgcrypt` (or move that use to OpenSSL/libsodium), `libconfig`
+  (or none: hassmic writes shairport's configuration from its settings), `libpopt` (or none: hassmic starts it with arguments).  Already on the Echo:
+  `libsodium`, `libuuid` (link against the firmware's), `libspeexresampler` (instead of `libsoxr`).  TLS: OpenSSL static, stripped of unused ciphers
+  (2-3 MB), or the firmware's `libssl` after checking its version and ABI (*check*).
+- **Do not build FFmpeg.**  Load the firmware's `libavcodec`/`libavutil` with `dlopen` as `a2dp_codecs.c` already does for AAC; this is a patch to
+  shairport-sync's decoder code, saving about 10 MB and the build.
+- Expected size: shairport-sync + nqptp stripped and static, 2-4 MB (*guess*), shipped in the signed update bundle (`/data/local/hassmic/ota`) like hassmic
+  itself, not on the system partition.
+- Keep it out of the default build like the Wi-Fi motion module: `make DEVICE=donut airplay`, a setting that is off by default, entities only while on.
+- Licences: shairport-sync's own licence (an MIT-style text, check the file), nqptp GPL-2.0 (*check*; a separate process, so it stays separate), libplist
+  LGPL, libsodium ISC, OpenSSL Apache-2.0.  The repository's rule about `third_party` licences applies.
+
+**Order of work (size: large, roughly the Drop In feature's)**: (1) on the PC (Linux) build shairport-sync with AirPlay 2 and the `pipe` backend,
+play from an iPhone, confirm PCM flows and what NQPTP needs; (2) NDK cross-build of the libraries and both daemons, run by hand on the Echo
+inside a temporary firewall opening; (3) the backend into hassmic's music stream and `MUSIC_AIRPLAY`; (4) firewall, mDNS, settings and entities, SECURITY.md;
+(5) tests with a fake sender where possible, a sync measurement against another AirPlay speaker; (6) GUIDE, CHANGELOG.
+Do not start before the cloud clean-up is finished and purged.
