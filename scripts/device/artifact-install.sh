@@ -4,16 +4,16 @@
 # it in state/artifacts/<stage>/ and named it in state/artifacts/request.  The models folders are root's (adb wrote them),
 # so root puts it there:
 #   artifact-install.sh STATE DATA        e.g. /data/local/hassmic/state /data/local/hassmic
-# Ids: wake:<name> -> DATA/models/<name>, sound -> DATA/aed, whisper -> DATA/whisper.  Staged files are read as the daemon's
+# Ids: wake:<name> -> DATA/models/<name>.  Staged files are read as the daemon's
 # user (READ_AS, main.sh: runas): whatever the daemon left there, a link included, only reaches what it may read anyway,
 # never a file of root's.  Root only looks at names and types, then copies into a fresh folder of its own and swaps it in.
 # Writes STATE/artifacts/result ("OK <id>" / "FAILED <id>: why" per line, owned by DAEMON_USER) and prints it; exit 0 if
-# at least one went in (main.sh then restarts hassmic: the wake word list and the whisper model are read at start).
+# at least one went in (main.sh then restarts hassmic: the wake word list is read at start).
 #   artifact-install.sh migrate STATE DATA
-# Wake word sets installed by hand under the short name (models/echo-de) get the one scripts/artifacts.sh gives them
+# Wake word sets installed by hand under the short name (models/echo-de) get the long name Amazon's sets carry
 # (echo-de-DE), so that the same set has one name on every Echo (the settings page copies by name).  main.sh runs it at
 # every satellite start, before hassmic.  The name is the wake word's id, so the saved choice (state/wake_word) follows.
-# Only languages Amazon serves in one region (scripts/lib/artifacts.sh LOCALES): en, fr, es come in several, and the
+# Only languages Amazon serves in one region (their regions): en, fr, es come in several, and the
 # files do not say which, so those stay as they are.  A long name already there: the short one goes if it holds the
 # same files, else both stay.
 umask 022
@@ -55,7 +55,7 @@ say() { echo "$1" >> $A/result.tmp; }
 good() { case $1 in ""|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) return 1;; esac; [ ${#1} -le 63 ]; }
 
 # the staged folder $1 into root's $2: plain files, and folders of them $3 levels down, as artifacts.c stages them
-# (whisper_components/, BDPGeneratedFiles/, nttfusionconfig/ntt_conv/).  A link, a deeper folder or a bad name: 1, $why says.
+# (BDPGeneratedFiles/, nttfusionconfig/ntt_conv/).  A link, a deeper folder or a bad name: 1, $why says.
 # Directories are made here, root's; files are read as the daemon's user, so a link swapped in meanwhile gains nothing.
 copy_in() {
     for f in $1/* $1/.[!.]* $1/..?*; do
@@ -79,8 +79,6 @@ install_one() {
     case $id in
     wake:*) name=${id#wake:}; good "$name" || { say "FAILED $id: bad name"; return; }
             stage=$A/wake.$name; mkdir -p $DATA/models; chmod 755 $DATA/models; dest=$DATA/models/$name; tmp=$DATA/models/.new-$name;;
-    sound) stage=$A/sound; dest=$DATA/aed; tmp=$DATA/.new-aed;;
-    whisper) stage=$A/whisper; dest=$DATA/whisper; tmp=$DATA/.new-whisper;;
     *) say "FAILED $id: not an artifact"; return;;
     esac
     [ -f $stage.ready ] && [ -d $stage ] && [ ! -L $stage ] || { say "FAILED $id: not staged"; return; }

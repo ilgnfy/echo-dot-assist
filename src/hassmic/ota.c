@@ -20,8 +20,7 @@
  * back to: ota_healthy() tells root's installer loop, which checks that it is the installed update and that the running
  * hassmic is its binary, then writes it (scripts/system/sysinstall.sh).
  *
- * Online updates (update.c) come the same way to root, signed with the project's release key instead of the owner's:
- * ota_handoff() checks that one and leaves the bundle where a push leaves it.  This port takes the owner's key only.
+ * This port takes the owner's key only (update.pub): there are no updates fetched from the internet.
  */
 #include "ota.h"
 #include <errno.h>
@@ -42,11 +41,10 @@
 #define MAX_BUNDLE (16u << 20)
 static int port;
 
-static pthread_mutex_t handoff_lock = PTHREAD_MUTEX_INITIALIZER;     /* one bundle in state/ota/ at a time: push or download */
+static pthread_mutex_t handoff_lock = PTHREAD_MUTEX_INITIALIZER;     /* one bundle in state/ota/ at a time */
 
 static const char *pub_path(void) { const char *e = getenv("HASSMIC_UPDATE_PUB"); return e ? e : "/system/hassmic/update.pub"; }
 /* main.sh names the release key of the copy that runs (an update may bring a new one), else the factory copy's */
-static const char *release_pub_path(void) { const char *e = getenv("HASSMIC_RELEASE_PUB"); return e && *e ? e : "/system/hassmic/release.pub"; }
 static const char *state_dir(void) { const char *e = getenv("HASSMIC_STATE"); return e ? e : "/data/local/hassmic/state"; }
 
 static void reply(int fd, const char *line) { char b[300]; int n = snprintf(b, sizeof b, "%s\n", line); write_all(fd, b, n); fprintf(stderr, "update: %s\n", line); }
@@ -108,19 +106,6 @@ static int stage(const uint8_t *b, size_t len, const uint8_t sig[64], char *dir,
     snprintf(dir, dircap, "%s/ota", state_dir()); mkdir(dir, 0700);
     snprintf(path, sizeof path, "%s/result", dir); unlink(path);
     return store(dir, "bundle", b, len) || store(dir, "bundle.sig", sig, 64) || store(dir, "request", "1\n", 2) ? -1 : 0;
-}
-
-int ota_handoff(const uint8_t *b, size_t len, const uint8_t sig[64], char *res, size_t cap)
-{
-    uint8_t pk[32]; char dir[280];
-    if (!load_key(release_pub_path(), pk)) { snprintf(res, cap, "FAILED no release key on this device (%s): an update with it pushed or installed first", release_pub_path()); return -1; }
-    if (crypto_eddsa_check(sig, pk, b, len)) { snprintf(res, cap, "FAILED signature does not verify against the release key"); return -1; }
-    pthread_mutex_lock(&handoff_lock);
-    if (stage(b, len, sig, dir, sizeof dir)) snprintf(res, cap, "FAILED cannot store the bundle");
-    else { fprintf(stderr, "update: %zu bytes downloaded, signed with the release key, handed to the installer\n", len); answer(dir, "result", 60, res, cap); }
-    pthread_mutex_unlock(&handoff_lock);
-    fprintf(stderr, "update: %s\n", res);
-    return strncmp(res, "OK", 2) ? -1 : 0;
 }
 
 void ota_healthy(void)

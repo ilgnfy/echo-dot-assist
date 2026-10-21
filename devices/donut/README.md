@@ -132,82 +132,15 @@ If `probe.sh` reports a different library, the Echo runs another firmware: stop 
 
 ### 3. Optional: another wake word
 
-Want "Echo" or "Computer" instead of "Alexa"? The Echo's settings page has "Download from Amazon" (a code to enter on
-Amazon's site, then the wake words of any language, whisper detection, the newer sound detection model). That is the
-way meant; the guided setup no longer downloads anything. The old way from the PC still works as a fallback (it
-warns first), and installs models already in `device-logs/models/`:
+The firmware ships only "Alexa", and this fork cannot fetch Amazon's others ("Echo", "Computer", ...) any more: the model sets came
+from Amazon's servers with a registered device's token (DAVS), which needs the cloud services this fork removes
+([docs/cloud-free.md](../../docs/cloud-free.md)). Two ways remain:
 
-```sh
-scripts/artifacts.sh <echo-ip>
-```
-
-Its menu has a list of ticks per kind, everything new ticked: "Wake words" (the ones already in `device-logs/models/`,
-as Amazon's sets are the same for every Echo: fetch once, copy to every Echo, and the ones Amazon has in the chosen
-language) and "Other artifacts", installed on the Echo as well: whisper detection (Home Assistant's "Last request
-whispered", [guide](../../docs/GUIDE.md#whisper-detection)), and Amazon's newest sound detection model in place of the
-firmware's (not ticked: so far it scores the same, `docs/re-aed.md`). Untick what
-you do not want; "Go on" shows what it will do and asks once. It tries each wake word on the Echo's own engine before installing it,
-and restarts hassmic. For downloads it walks through the Amazon route below by itself, once for all of them: stock
-mode with the update block, you register the Echo in the Alexa app, it downloads the models (asking for what this
-Echo's engine can load), it removes the app's Wi-Fi and the registration and goes back to satellite mode, and only
-then you deregister: a stock Echo that is deregistered while online resets itself to factory settings, hassmic's
-settings and models included. Home Assistant then offers every installed model in the
-Echo's wake word select. What it does, by hand:
-
-<details>
-<summary>"Echo", "Computer", "Amazon", "Ziggy": fetch the model from Amazon once</summary>
-
-The firmware ships only "Alexa". The others are Pryon model sets that a registered Echo downloads from Amazon (DAVS) on
-demand, per language; the stock engine loads them as they are. Fetching one needs a registered device's access token,
-so the Echo goes online with Amazon once: now, before the lockdown, or on an installed Echo with
-`MODE=stock-online` (last paragraph).
-
-**The danger is a firmware update**, which can cost root and the unlock. `otad` and `ace_otad` run as user `ace_otad` and
-start `update_engine` on demand, so blocking that one user is enough:
-
-```sh
-adb push scripts/device/lockdown.sh devices/donut/device.conf /data/local/tmp/
-adb shell "sh /data/local/tmp/lockdown.sh ota-only watch > /data/local/tmp/otaguard.log 2>&1 &"
-adb shell iptables -S hassmic_out        # must show: -m owner --uid-owner <n> -j DROP
-```
-
-The guard is gone after a reboot, the Wi-Fi profile is not: restart the guard after every reboot before anything else,
-or block the Echo's internet at the router while it boots, until the token is on the PC.
-
-1. Set the Echo up with the Alexa app (Wi-Fi with internet, Amazon account). The app ends on "updating" and the ring
-   spins a while: that is the update check getting no answer, nothing is installed.
-2. Pull the registration (the token is valid for an hour, renewed while online) and fetch the model. Language is a
-   parameter; no need to change anything in the app.
-   ```sh
-   adb pull /data/ace/kvstorage/map.db device-logs/map.db
-   tools/davs-fetch.py device-logs/map.db echo de-DE          # -> device-logs/models/echo-de-DE/unpacked/
-   ```
-   Keys known to work: `alexa echo computer amazon ziggy`. `device-logs/` is git-ignored: models are Amazon's, `map.db`
-   is your account's device credential.
-3. Optional check on the PC: copy `unpacked/` below `firmware/donut/rootfs/`, then
-   `tools/qrun.sh build/donut/pryon_test -m /<path below rootfs>/pryon.manifest testdata/echo_espeak_de.raw` must print
-   `RESULT ... keyword=ECHO type=2` (de-DE loads under qemu, the larger en-US set did not).
-4. Remove the device from your Amazon account in the app. If the Wi-Fi the app added is not the satellite's network,
-   remove it on the Echo (`wpa_cli -i wlan0 -p /data/misc/wifi/sockets list_networks`, `remove_network <id>`,
-   `save_config`): with two profiles it roamed and kept the wrong lease. Optionally clear the dead registration: on the
-   PC `sqlite3 map.db "delete from deviceData; vacuum;"`, push back (owner `ace_maplite:ace_maplite`, mode 660), reboot.
-   Then continue with install step 4.
-5. Install the model:
-   ```sh
-   adb shell mkdir -p /data/local/hassmic/models
-   adb push device-logs/models/echo-de-DE/unpacked /data/local/hassmic/models/echo-de
-   adb shell chmod -R a+rX /data/local/hassmic/models
-   ```
-   Restart hassmic (or reboot). Home Assistant then offers every installed model in the Echo's wake word select
-   ("Alexa" plus "Echo" here, named after the folder: `<keyword>-<language>`); pick one, it switches at once and stays.
-   `-m <manifest>` in `ARGS` only sets which one to start with until you pick one in Home Assistant.
-
-**On an installed Echo**: add `MODE=stock-online` to `/data/local/hassmic/hassmic.conf` and reboot. hassmic stays off,
-stock Alexa runs with internet, and the update guard is applied at every boot (this is the variant used end to end
-here). Allow the Echo internet at the router, do steps 1–5, then remove the `MODE` line. No push port in this mode: use
-adb.
-
-</details>
+- **microWakeWord** (settings page, section "Wake word"): ESPHome's small models ("Okay Nabu", "Hey Jarvis", ...) or your own. It hears
+  less well than Amazon's engine; the page says what it costs.
+- A wake word set you already have (from an earlier install of this project, or pulled from another Echo with "Copy models" on the
+  settings page): put it in `/data/local/hassmic/models/<name>-<locale>/` with `adb push` and restart hassmic. The page's "Copy models" moves
+  such sets between Echos, trying each on the receiving Echo's engine first.
 
 ### 4. Lock down, then join Wi-Fi
 

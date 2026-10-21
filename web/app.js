@@ -103,7 +103,6 @@ const ICONS = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>',
   ha: '<path d="M3 11.5L12 4l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><circle cx="12" cy="14" r="2"/>',
   wave: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10"/>',
-  whisper: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01"/>',
   wifi: '<path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5v.01"/>',
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18h2"/>',
   box: '<rect x="5" y="2.5" width="14" height="19" rx="2"/><circle cx="12" cy="14" r="3.5"/><path d="M12 7v.01"/>',
@@ -185,7 +184,7 @@ const SECTIONS = [
   { id: 'Music', icon: 'music', intro: 'Music Assistant plays on the Echo as a Sendspin player.' },
   { id: 'Bluetooth', icon: 'bt', intro: 'For phones playing music on the Echo.' },
   { id: 'Echos', icon: 'net', intro: '' },
-  { id: 'System', icon: 'sliders', intro: 'This Echo\'s name and network, updates, backups and troubleshooting.' },
+  { id: 'System', icon: 'sliders', intro: 'This Echo\'s name and network, backups and troubleshooting.' },
 ];
 
 // help: what it does, in the user's terms.  ha: also in Home Assistant (true), or for features the entities it adds.
@@ -208,15 +207,6 @@ const HELP = {
   bluetooth_announcement_language: { help: 'The language of those sentences. Home Assistant does not tell the Echo which language your voice assistant speaks, so pick the one that matches its voice.' },
   sendspin_unpaired: { help: 'Lets any Music Assistant server on the network play here without pairing. Off: only a server given this Echo\'s "Sendspin pairing token" (a diagnostic entity in Home Assistant) may play.' },
   https_verify: { help: 'When Home Assistant serves HTTPS itself, it gives the Echo https:// addresses for its spoken replies and announcements, usually its external URL. On (the default): the Echo plays them only from a server whose certificate a known authority signed for that very name, as a browser would. A self-signed certificate, or one that does not name the address Home Assistant gives out, is refused: replies stay silent and the log says why. Off: any certificate is taken, so someone on your network could pass the Echo audio of their own instead of Home Assistant\'s. Plain http:// addresses are not affected.' },
-  online_updates: { help: 'Where new versions come from. Release: tested releases only. Beta: every new build, plus releases. Off: nothing is fetched. The Echo downloads them itself from the project\'s releases on GitHub, not through this browser or Home Assistant, so it needs internet access to github.com: an Echo on a network kept off the internet cannot use this, and switching it on first checks that GitHub answers. The Echo\'s "Firmware" entity in Home Assistant then shows what is new and installs it; every update is signature-checked, and the Echo falls back by itself if a new version does not stay up.',
-    status: () => updCheck.busy ? h('div', { class: 'callout info' }, icon('net'), h('p', {}, 'Checking that this Echo can reach GitHub…'))
-      : updCheck.why ? h('div', { class: 'callout bad big' }, icon('warn'), h('div', { class: 'grow' },
-        h('p', {}, h('b', {}, 'Online updates were not switched on: this Echo cannot reach GitHub.')),
-        h('p', {}, 'It downloads updates itself, so it needs to get out to the internet. Check that its network, firewall, VLAN or DNS filter lets it reach github.com, api.github.com and GitHub\'s download servers (*.githubusercontent.com) over HTTPS, then pick a channel again.'),
-        h('p', { class: 'why' }, 'What failed: ', h('code', {}, updCheck.why)),
-        h('button', { class: 'link', onclick: () => { updCheck.why = ''; paintStatus('online_updates'); } }, 'Dismiss')))
-      : null },
-
   arbitration: { icon: 'net', ha: ['Arbitration peers'], help: 'When several Echos hear the wake word, only the one that heard you best answers; the others stay silent and dark. Only devices listening for the same wake word compete. Off: this Echo answers every wake word it hears.',
     status: () => {
       const a = state.arbitration; if (!a || !a.arbitrates || a.mode !== 'kiosk') return null;
@@ -240,8 +230,8 @@ const HELP = {
         microwakeword: ['-', 'Significantly worse: expect more missed wake words, above all from across the room or over music, and more false wakes. Its small models were trained mostly on synthetic speech, never with this Echo\'s microphones and audio front end'],
         homeassistant: ['-', 'Expect it to be less reliable than Amazon\'s engine: openWakeWord\'s models, like microWakeWord\'s, are trained mostly on synthetic speech'] }],
       ['Wake words', {
-        amazon: ['-', 'Amazon\'s only, no new ones: Alexa, and Echo, Computer, Amazon, Ziggy in many languages from Amazon on this page'],
-        microwakeword: ['+', 'Any someone trained a model for: “Okay Nabu”, “Hey Jarvis”, “Hey Mycroft”, or your own from microWakeWord\'s training notebook. The same model files ESPHome devices (Home Assistant Voice PE) use. Amazon\'s, also those downloaded from Amazon, are not offered (its “Alexa” is a model of its own)'],
+        amazon: ['-', 'Amazon\'s only, no new ones: the models already on the Echo (Alexa and what the firmware ships)'],
+        microwakeword: ['+', 'Any someone trained a model for: “Okay Nabu”, “Hey Jarvis”, “Hey Mycroft”, or your own from microWakeWord\'s training notebook. The same model files ESPHome devices (Home Assistant Voice PE) use. Amazon\'s are not offered (its “Alexa” is a model of its own)'],
         homeassistant: ['+', 'Any your Home Assistant knows, openWakeWord models of your own included: the same as your other satellites, set up in one place'] }],
       ['“<wake word>, stop”', {
         amazon: ['+', 'Ends a ringing timer or a reply'],
@@ -259,7 +249,7 @@ const HELP = {
         amazon: ['+', 'On the Echo'],
         microwakeword: ['+', 'On the Echo'],
         homeassistant: ['-', 'On your Home Assistant\'s hardware: the microphone streams there all the time, about 256 kbit/s on your network, and nothing hears the wake word while Home Assistant or the network is down'] }],
-      ['Sound and whisper detection', {
+      ['Sound detection', {
         amazon: ['+', 'Work'],
         microwakeword: ['+', 'Keep working: they do not depend on the wake word engine'],
         homeassistant: ['+', 'Sound detection keeps working'] }],
@@ -316,12 +306,10 @@ const HELP = {
     status: () => {
       const s = state.sound; if (!s) return null;
       if (s.failed) return h('p', { class: 'f-bad' }, icon('warn'), h('span', {}, 'Could not start: the model did not load, so it was switched off. The Echo\'s log (boot.log) says why.'));
-      return h('p', { class: 'f-model' }, s.model === 'newer' ? 'Model: Amazon\'s newer one, from Amazon.'
-        : 'Model: the one in the Echo\'s firmware. Download from Amazon (Wake word section) gets Amazon\'s newer one (retrained, same sounds).');
+      return h('p', { class: 'f-model' }, 'Model: the one in the Echo\'s firmware.');
     } },
   wake_events: { icon: 'ear', ha: ['Wake word (event)'], help: 'Home Assistant gets a "Wake word" event each time this Echo hears its wake word: detected (it took it), near_miss (almost: Amazon\'s engine heard something close but did not wake), answered_elsewhere (another Echo or satellite answered it) and no_speech (it woke, then nothing was said). Count them per room in an automation; a detected followed by no_speech is a false wake.',
     note: 'Near misses can come often while the TV or music plays, each an entry in Home Assistant\'s history. microWakeWord has no near misses.' },
-  whisper_detection: { icon: 'whisper', ha: ['Last request whispered'], help: 'Tells whether your last request was whispered, before speech-to-text finishes. Use it in your conversation agent\'s prompt to have it answer quietly.' },
   wifi_motion: { icon: 'wifi', tag: 'Experimental', ha: ['Wi-Fi motion', 'Wi-Fi motion sensitivity'], help: 'A motion sensor without extra hardware: someone walking between the Echo and your Wi-Fi router changes how the Echo receives the router. It shows motion, not presence, sees best along that path, and other Wi-Fi traffic can set it off.' },
   wifi_motion_sensitivity: { parent: 'wifi_motion', help: 'How much the signal has to change to count as motion. Higher catches more, with more false alarms.' },
   light_sensor: { icon: 'sun', ha: ['Illuminance'], help: 'The room\'s light in lux from the Echo\'s light sensor, for automations. With this on, "LED brightness" in Home Assistant also follows the ring while auto brightness moves it, which puts an entry in its logbook every few minutes. Off, auto brightness works the same; Home Assistant only sees the levels you set.' },
@@ -343,7 +331,6 @@ const CHOICE_NAMES = {
   wake_engine: { amazon: 'Amazon', microwakeword: 'microWakeWord', homeassistant: 'Home Assistant' },
   arbitration_mode: { hassmic: 'Echo network', kiosk: 'Kiosk Satellite' },
   noise_reduction: { off: 'Off', low: 'Low', medium: 'Medium', high: 'High' },
-  online_updates: { off: 'Off', beta: 'Beta', release: 'Release' },
   drop_in_answer: { auto: 'At once', ask: 'After the action button' },
   bluetooth_announcement_language: { en: 'English', de: 'Deutsch', fr: 'Français', es: 'Español', it: 'Italiano', pt: 'Português', nl: 'Nederlands',
     sv: 'Svenska', da: 'Dansk', nb: 'Norsk', fi: 'Suomi', pl: 'Polski' },
@@ -472,31 +459,23 @@ async function load() {
     load.started = true;
     answerVouch();
     refreshDevices().catch(() => {});
-    getDavs().then(() => { renderDavs(); davsPoll(); }).catch(() => {});
     setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 15000);
     setInterval(() => { if (!document.hidden) refreshDevices().catch(() => {}); }, 30000);
   }
 }
 
-// Online updates: the Echo tries GitHub before it takes a channel (web.c updates_gate); what it found shows under the row
-let updCheck = { busy: false, why: '' };
 const paintStatus = (name) => { const c = controls.get(name); if (c && c.paint) c.paint(); };
 
 async function set(name, value) {
-  const gate = name === 'online_updates' && value !== 'off' && settingValue(name) === 'off';
-  if (name === 'online_updates') { updCheck = { busy: gate, why: '' }; paintStatus(name); }
   try {
     const r = await (await echo.call('POST', '/api/set', `${name}=${value}\n`)).json();
-    if (gate) updCheck.why = r.github_unreachable || '';
-    if (r.github_unreachable) { /* the warning under the row says it */ }
-    else if (r.errors) toast(r.errors.trim());
+    if (r.errors) toast(r.errors.trim());
     else {
       const s = state.settings.find((x) => x.name === name);
       if (s && s.feature) toast('Saved. Home Assistant reconnects to update its entities.');
       flash(name);
     }
   } catch (e) { toast(errText(e)); }
-  if (gate) { updCheck.busy = false; paintStatus(name); }
   await load();
   // once more shortly: what the change set off (a feature that cannot start switches itself back off) shows without the 15 s wait
   clearTimeout(set.again); set.again = setTimeout(() => load().catch(() => {}), 1500);
@@ -760,19 +739,13 @@ function renderTop() {
   if (d.cpu !== null) p.append(h('span', { class: 'pill', title: 'CPU usage' }, `CPU ${d.cpu} %`));
 }
 
-// "Download from Amazon" in a warning: a link to that card, a long scroll down the Wake word section
-function linkDavs(text) {
-  const [a, b] = text.split('Download from Amazon');
-  return [a, h('a', { href: '#davs', onclick: (e) => { e.preventDefault(); $('davs').scrollIntoView({ behavior: 'smooth' }); } }, 'Download from Amazon'), b];
-}
-
 function renderAttention() {
   const box = $('attention'); box.innerHTML = '';
   for (const text of state.warnings) {
     const ha = /Home Assistant is not connected/.test(text);
     box.append(h('div', { class: 'callout' + (ha ? ' bad' : '') }, icon('warn'),
       h('p', {}, ha ? 'Home Assistant is not connected. The Echo cannot answer requests until it is; check that the ESPHome integration has this device and that both are on the same network.'
-        : /Download from Amazon/.test(text) && $('davs') ? linkDavs(text) : text)));
+        : text)));
   }
 }
 
@@ -809,8 +782,7 @@ async function getMww() { mww = (await echo.call('GET', '/api/mww')).json(); ren
 function buildWake(el) {
   mwwWarn = h('div');
   mwwBox = h('div', { class: 'card' });
-  davsBox = h('div', { class: 'card', id: 'davs' });          // more of Amazon's wake words: where one looks for them
-  el.append(mwwWarn, mwwBox, davsBox);
+  el.append(mwwWarn, mwwBox);
 }
 
 async function mwwAdd(id, model, manifest) {
@@ -871,10 +843,10 @@ const mwwLosses = () => [callout('warn', h('p', {}, h('b', {}, 'It hears the wak
   h('p', { class: 'ask-sub' }, 'While it is on, you also lose:'),
   h('ul', { class: 'pc' }, ['\u201c<wake word>, stop\u201d to end a ringing timer or a reply',
     'The extra sensitivity while the Echo plays music, rings or speaks',
-    'Amazon\'s wake words, also those downloaded from Amazon',
+    'Amazon\'s wake words',
     'The audio front end\'s scores in wake word arbitration: with several Echos, the one that answers is a rougher guess']
     .map((t) => h('li', { class: 'con' }, icon('minus'), h('span', {}, t)))),
-  h('p', { class: 'help' }, 'Sound detection and whisper detection keep working. You can switch back at any time.'
+  h('p', { class: 'help' }, 'Sound detection keeps working. You can switch back at any time.'
     + (settingValue('wake_engine') === 'homeassistant' ? ' Leaving Home Assistant\'s wake word restarts the satellite for a few seconds.' : ''))];
 
 // What Home Assistant needs before it hears the wake word in the Echo's stream (its docs, 2026-10: add-ons are "Apps")
@@ -1277,7 +1249,7 @@ function drawDevices() {
     h('div', { class: 'echo-body' }, h('div', { class: 'echo-name' }, 'No other Echo yet'),
       h('div', { class: 'help' }, 'Echos running hassmic on the same network show up here by themselves within a minute. Then this section copies settings and models to them.'))));
   syncBox.classList.toggle('hidden', !others.size); modelBox.classList.toggle('hidden', !others.size);
-  renderSync(); renderDavs(); renderModels();
+  renderSync(); renderModels();
 }
 
 // Drop In (dropin.c) on a member of the network: from this Echo, which needs no login on the other one
@@ -1455,228 +1427,6 @@ async function copySettings(names, list) {
   await refreshDevices();
 }
 
-// ---------------------------------------------------------------- download Amazon's models on this Echo
-
-// What Amazon hands out (scripts/lib/artifacts.sh's lists): wake words per language, whisper (one model, whatever the
-// language), and the newer sound detection model (kept by region, not language).
-const WW_KEYS = ['alexa', 'echo', 'computer', 'amazon', 'ziggy'];
-const LOCALES = ['de-DE', 'en-US', 'en-GB', 'fr-FR', 'it-IT', 'es-ES', 'ja-JP', 'pt-BR', 'en-CA', 'fr-CA', 'en-AU', 'en-IN', 'es-MX'];
-const WW_NAMES = { alexa: 'Alexa', echo: 'Echo', computer: 'Computer', amazon: 'Amazon', ziggy: 'Ziggy' };
-// The Amazon sites with Alexa (davs.c has the same list).  An account lives in one region; any site of it takes the code.
-const AMAZON_SITES = [
-  ['North and South America', ['com', 'ca', 'com.mx', 'com.br']],
-  ['Europe', ['co.uk', 'de', 'fr', 'it', 'es']],
-  ['Asia and Pacific', ['co.jp', 'com.au', 'in']],
-];
-const SITE_OF = { 'en-GB': 'co.uk', 'en-IE': 'co.uk', 'en-CA': 'ca', 'fr-CA': 'ca', 'es-MX': 'com.mx', 'pt-BR': 'com.br', 'en-AU': 'com.au',
-  'en-IN': 'in', de: 'de', fr: 'fr', it: 'it', es: 'es', pt: 'es', ja: 'co.jp' };
-const defaultSite = () => { const l = navigator.language || ''; return store('hm.amazon') || SITE_OF[l] || SITE_OF[l.split('-')[0]] || 'com'; };
-const davsLoc = () => dv.locale || store('hm.davsLocale') || LOCALES.find((l) => l === (navigator.language || '').replace('_', '-')) || 'de-DE';
-
-let davsBox, davs = null, davsT = null, davsKey = '', davsUntil = 0, davsTotal = 0, davsClock = null;
-// the user's picks, a run in progress (one row per pick), and the outcome of the last one (kept over the reload that
-// follows an install, in sessionStorage)
-const dv = { locale: null, ticks: new Map(), job: null, last: null };
-try { dv.last = JSON.parse(sessionStorage.getItem('hm.davsResult')); sessionStorage.removeItem('hm.davsResult'); } catch (e) { /* none */ }
-
-async function getDavs() {
-  try { davs = await (await echo.call('GET', '/api/davs')).json(); } catch (e) { davs = null; }
-  if (davs && davs.state === 'waiting') { davsUntil = Date.now() + davs.left_s * 1000; davsTotal = Math.max(davsTotal, davs.left_s); }
-  else davsTotal = 0;
-  return davs;
-}
-
-function davsCatalog() {
-  const loc = davsLoc();
-  return [
-    ...WW_KEYS.map((k) => ({ key: k, locale: loc, id: `wake:${k}-${loc}`, group: 'Wake words', name: `${WW_NAMES[k]} (${loc})` })),
-    { key: 'whisper', locale: 'en-US', id: 'whisper', group: 'Models', name: 'Whisper detection', note: 'Tells Home Assistant when a request was whispered' },
-    { key: 'aed', locale: loc, id: 'sound', group: 'Models', name: 'Sound detection, newer model', note: 'Replaces the one in the firmware' },
-  ];
-}
-const callout = (kind, ...kids) => h('div', { class: 'callout ' + kind }, icon(kind === 'ok' ? 'check' : kind === 'info' ? 'info' : 'warn'), h('div', { class: 'grow' }, ...kids));
-const stepper = (cur) => h('ol', { class: 'stepper' }, ['Sign in', 'Enter the code', 'Pick and download'].map((t, i) =>
-  h('li', { class: i + 1 < cur ? 'done' : i + 1 === cur ? 'cur' : '' }, h('span', { class: 'st-l' }, t))));
-
-function renderDavs(force) { if (davsBox) keepFocus(davsBox, () => drawDavs(force)); }
-function drawDavs(force) {
-  // rebuilt only when something shown changed: a poll that finds all as it was leaves an open drop-down alone
-  const key = JSON.stringify([davs && { ...davs, left_s: 0 }, dv, [...dv.ticks], myArts && myArts.artifacts.map((a) => a.id)]);
-  if (!force && key === davsKey) return;
-  davsKey = key;
-  davsBox.innerHTML = '';
-  davsBox.append(cardHead('Download from Amazon', 'More wake words and Amazon\'s newer models, straight from Amazon onto this Echo. Once here, the Echos section copies them to your other Echos.', 'ext'));
-  if (!davs) { davsBox.append(empty('warn', 'This Echo did not say where its Amazon sign-in stands: it may be restarting.')); return; }
-  const body = h('div', { class: 'card-body' });
-  davsBox.append(body);
-  if (!davs.dha) {
-    body.append(callout('info', h('p', {}, 'This Echo cannot sign in to Amazon itself: its attestation key would not answer. Download on another Echo and copy the models here (Echos section).')));
-    return;
-  }
-  if (davs.state === 'none') davsSignIn(body);
-  else if (davs.state === 'waiting') davsCode(body);
-  else davsPicker(body);
-  davsTick();
-}
-
-function davsSignIn(body) {
-  const site = h('select', { id: 'davs-site' }, AMAZON_SITES.map(([region, list]) => h('optgroup', { label: region },
-    list.map((s) => h('option', { value: s, selected: s === defaultSite() }, `amazon.${s}`)))));
-  site.onchange = () => store('hm.amazon', site.value);
-  const go = h('button', { class: 'primary', onclick: async () => {
-    go.disabled = true;
-    try { await echo.call('POST', '/api/davs/login', site.value); } catch (e) { toast(errText(e)); }
-    await getDavs(); renderDavs(true); davsPoll();
-  } }, icon('key'), 'Get a sign-in code');
-  body.append(...[stepper(1),
-    davs.error ? callout('bad', h('p', {}, davs.error)) : null,
-    h('div', { class: 'field' }, h('label', { for: 'davs-site' }, 'Your Amazon'), site,
-      h('p', { class: 'help' }, 'The site you shop on. Any site in your account\'s region works.'))].filter(Boolean));
-  davsBox.append(h('div', { class: 'card-foot' },
-    h('span', { class: 'help grow' }, 'This Echo then shows up in your Alexa app, as Echos do, until you sign it out here.'), go));
-}
-
-function davsCode(body) {
-  const site = davs.url.replace(/^https:\/\/www\./, '').replace(/\/code$/, '');
-  const cancel = h('button', { onclick: async () => {
-    cancel.disabled = true;
-    try { await echo.call('POST', '/api/davs/cancel'); } catch (e) { toast(errText(e)); }
-    await getDavs(); renderDavs(true);
-  } }, 'Cancel');
-  const code = davs.code;   // none yet: the Echo is still asking Amazon for one
-  body.append(stepper(2),
-    h('div', { class: 'davs-code' + (code ? '' : ' pending') },
-      h('div', { class: 'code', title: 'The code to enter on Amazon' }, code || '······'),
-      h('div', { class: 'davs-code-r' },
-        h('p', {}, 'Enter this code on ', h('b', {}, `${site}/code`), ', signed in to your Amazon account. This page carries on by itself.'),
-        h('div', { class: 'btns' }, code ? h('a', { class: 'btn primary', href: davs.url, target: '_blank', rel: 'noopener' }, `Open ${site}/code`, icon('ext')) : null, cancel))),
-    h('div', { class: 'davs-wait' }, h('span', { class: 'spin' }), code ? 'Waiting for the code' : 'Getting a code from Amazon…', h('span', { class: 'grow' }),
-      code ? [h('span', { class: 'davs-left' }), ' left'] : null),
-    h('div', { class: 'progress thin' }, h('div', { class: 'davs-bar' })));
-}
-
-// the countdown, in place: a rebuild every second would be the flicker this card used to have
-function davsTick() {
-  const el = davsBox && davsBox.querySelector('.davs-left');
-  if (!el) return;
-  const s = Math.max(0, Math.round((davsUntil - Date.now()) / 1000));
-  el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  const bar = davsBox.querySelector('.davs-bar');
-  if (bar) bar.style.width = `${davsTotal ? (100 * s) / davsTotal : 0}%`;
-}
-
-function davsLast() {
-  const r = dv.last;
-  if (!r) return null;
-  // what root's installer said (artifacts.c "result"): "OK <id> FAILED <id>: why ..."
-  const rootBad = r.installed ? ((myArts && myArts.result) || '').split(/ (?=OK |FAILED )/).filter((l) => l.startsWith('FAILED ')).map((l) => l.slice(7)) : [];
-  const bad = [...r.bad.map(([n, why]) => `${n}: ${why}`), ...rootBad, ...(r.install ? [`Installing: ${r.install}`] : [])];
-  const dismiss = h('button', { class: 'link', onclick: () => { dv.last = null; renderDavs(); } }, 'Dismiss');
-  return callout(bad.length ? (r.ok.length ? 'warn' : 'bad') : 'ok',
-    r.ok.length ? h('p', {}, `${r.installed ? 'Installed' : 'Downloaded'}: ${nameList(r.ok)}.`) : null,
-    bad.length ? h('p', {}, r.ok.length ? 'Not this time:' : 'Nothing arrived:') : null,
-    bad.length ? h('ul', {}, bad.map((b) => h('li', {}, b))) : null, dismiss);
-}
-
-function davsPicker(body) {
-  const job = dv.job, has = (id) => !!(myArts && myArts.artifacts.some((a) => a.id === id));
-  const out = h('button', { class: 'small', disabled: !!job, onclick: async () => {
-    if (!(await ask({ title: 'Sign out of Amazon?', ok: 'Sign out', danger: true, body: 'This Echo leaves your Alexa app; downloading again needs a new code.' }))) return;
-    try { await echo.call('POST', '/api/davs/logout'); } catch (e) { toast(errText(e)); }
-    await getDavs(); renderDavs(true);
-  } }, 'Sign out');
-  body.append(h('div', { class: 'davs-acct' }, h('span', { class: 'ic' }, icon('check')),
-    h('div', { class: 'grow' }, h('b', {}, davs.device || 'Signed in'),
-      h('div', { class: 'help' }, `Signed in to amazon.${davs.domain}; the Alexa app lists this Echo under that name.`)), out));
-  const last = davsLast();
-  if (last) body.append(last);
-  else if (davs.error && !job) body.append(callout('bad', h('p', {}, davs.error)));
-  const lang = h('select', { id: 'davs-lang', 'data-k': 'lang', disabled: !!job, onchange: () => { dv.locale = lang.value; store('hm.davsLocale', lang.value); renderDavs(); } },
-    LOCALES.map((l) => h('option', { value: l, selected: l === davsLoc() }, l)));
-  davsBox.append(h('div', { class: 'pickbar' }, h('label', { class: 'pick-l', for: 'davs-lang' }, 'Language'), lang,
-    h('span', { class: 'pick-hint' }, 'Which wake words exist depends on it')));
-
-  const list = h('div', { class: 'changes' });
-  let group = '';
-  for (const c of davsCatalog()) {
-    if (c.group !== group) { group = c.group; list.append(h('div', { class: 'grp' }, group)); }
-    const it = job && job.items.find((x) => x.id === c.id), on = !!dv.ticks.get(c.id);
-    const cb = checkbox(on, (v) => { dv.ticks.set(c.id, v); dv.last = null; renderDavs(); }, c.name, 'art ' + c.id);
-    cb.disabled = !!job;
-    let st = has(c.id) ? h('span', { class: 'badge ok' }, icon('check'), 'Installed') : null;
-    if (it) st = it.status === 'run' ? [h('span', { class: 'spin' }), it.pct ? `${it.pct} %` : 'Asking Amazon…']
-      : it.status === 'ok' ? h('span', { class: 'badge ok' }, icon('check'), 'Downloaded')
-      : it.status === 'bad' ? h('span', { class: 'badge bad' }, 'Failed') : h('span', { class: 'davs-none' }, 'Waiting');
-    list.append(h('label', { class: `change davs-row ${on ? 'on' : 'off'}${job ? ' idle' : ''}` }, cb,
-      h('div', { class: 'ch-name' }, c.name, c.note ? h('div', { class: 'ch-sub' }, c.note) : null,
-        it && it.why ? h('div', { class: 'ch-sub bad' }, it.why) : null),
-      h('div', { class: 'davs-st' }, st)));
-  }
-  davsBox.append(list);
-
-  const n = davsCatalog().filter((c) => dv.ticks.get(c.id)).length;
-  const now = job && job.items.find((x) => x.status === 'run'), elsewhere = !job && davs.state === 'busy';   // another browser's run
-  davsBox.append(h('div', { class: 'card-foot sync-foot' },
-    h('div', { class: 'count grow' }, job ? (job.phase === 'install' ? 'Installing: the satellite restarts for a few seconds…' : `Downloading ${now ? now.name : ''}…`)
-      : elsewhere ? `Another browser is downloading ${davs.busy} (${davs.progress} %)`
-      : n ? [h('b', {}, plural(n, 'download')), ', then the satellite restarts once to install them'] : 'Tick what to download'),
-    h('button', { class: 'primary', disabled: !!job || elsewhere || !n, onclick: downloadAmazon },
-      job ? [h('span', { class: 'spin' }), job.phase === 'install' ? 'Installing…' : 'Downloading…'] : 'Download and install')));
-}
-
-async function downloadAmazon() {
-  const picks = davsCatalog().filter((c) => dv.ticks.get(c.id));
-  if (!picks.length) return;
-  dv.last = null;
-  dv.job = { phase: 'download', items: picks.map((c) => ({ id: c.id, name: c.name, status: 'wait', pct: 0, why: '' })) };
-  renderDavs();
-  try {
-    for (const [i, p] of picks.entries()) {
-      const it = dv.job.items[i];
-      it.status = 'run'; renderDavs();
-      try { await echo.call('POST', '/api/davs/fetch', `${p.key} ${p.locale}`); }
-      catch (e) { it.status = 'bad'; it.why = errText(e).replace(/^Error: /, ''); renderDavs(); continue; }
-      for (let missed = 0; ;) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const st = await getDavs();
-        if (!st) {   // one lost answer (Wi-Fi) is no end; a minute of them is
-          if (++missed < 60) continue;
-          it.status = 'bad'; it.why = 'this Echo stopped answering'; break;
-        }
-        missed = 0;
-        if (st.state === 'busy') { it.pct = st.progress || 0; renderDavs(); continue; }
-        if (st.done) it.status = 'ok';            // each pick's own end: "done" only tells of the last one
-        else { it.status = 'bad'; it.why = st.error || 'it did not arrive'; }
-        break;
-      }
-      renderDavs();
-    }
-    const items = dv.job.items, ok = items.filter((x) => x.status === 'ok');
-    const result = { ok: ok.map((x) => x.name), bad: items.filter((x) => x.status === 'bad').map((x) => [x.name, x.why]), installed: false };
-    if (!ok.length) { dv.last = result; return; }
-    dv.job.phase = 'install'; renderDavs();
-    try { await echo.call('POST', '/api/artifact/install'); await waitBack(echo); }
-    catch (e) { result.install = errText(e).replace(/^Error: /, ''); dv.last = result; return; }
-    result.installed = true;
-    dv.ticks.clear();
-    // the satellite restarted with the new models: the page starts over (wake word lists), and shows the outcome then
-    try { sessionStorage.setItem('hm.davsResult', JSON.stringify(result)); } catch (e) { dv.last = result; return; }
-    location.reload();
-  } finally {
-    dv.job = null; renderDavs();
-  }
-}
-
-function davsPoll() {
-  clearTimeout(davsT);
-  if (!davsClock) davsClock = setInterval(davsTick, 1000);
-  const quick = davs && (davs.state === 'waiting' || davs.state === 'busy');
-  davsT = setTimeout(async () => {
-    if (!document.hidden && !dv.job) { await getDavs(); renderDavs(); }   // a run polls by itself
-    davsPoll();
-  }, quick ? 2000 : 15000);
-}
-
 // ---------------------------------------------------------------- copy models (Amazon's artifacts) between Echos
 
 const CHUNK = 192 * 1024;
@@ -1688,8 +1438,6 @@ function artLabel(a) {
   if (a.kind === 'design') return `Light ring design "${a.name}"`;
   if (a.kind === 'pack') return `Light ring theme pack "${a.name}"`;
   if (a.kind === 'mww') return `microWakeWord model ${a.name}`;
-  if (a.kind === 'sound') return 'Sound detection, newer model';
-  if (a.kind === 'whisper') return 'Whisper detection';
   const [w, ...loc] = a.name.split('-');
   return `Wake word ${w[0].toUpperCase() + w.slice(1)}${loc.length ? ` (${loc.join('-')})` : ''}`;
 }
@@ -1698,7 +1446,7 @@ const mb = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(
 function renderModels() { if (modelBox) keepFocus(modelBox, drawModels); }
 function drawModels() {
   modelBox.innerHTML = '';
-  modelBox.append(cardHead('Copy models', 'Amazon\'s extra models from Download from Amazon (more wake words, whisper detection, the newer sound detection model), microWakeWord\'s models and your light ring designs and theme packs, Echo to Echo instead of adding them on each. A model is tried on the receiving Echo first; each Echo that gets one of Amazon\'s restarts its satellite once, for a few seconds. A design goes into the other Echo\'s designs only: none of its animations shows it until picked there.', 'box'));
+  modelBox.append(cardHead('Copy models', 'Amazon\'s wake word sets copied in by hand, microWakeWord\'s models and your light ring designs and theme packs, Echo to Echo instead of adding them on each. A model is tried on the receiving Echo first; each Echo that gets one of Amazon\'s restarts its satellite once, for a few seconds. A design goes into the other Echo\'s designs only: none of its animations shows it until picked there.', 'box'));
   if (!myArts && !myRing) { modelBox.append(empty('warn', 'This Echo cannot list its models.')); return; }
   // each Echo's models, and its light ring designs as models of their own (ring.js): known by their text, the same
   // everywhere or missing, never "another version"; an Echo without designs (older hassmic) cannot take them

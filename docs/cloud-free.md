@@ -202,8 +202,8 @@ real replacement a reboot clears it. A boot always mounts the system partition r
 - `kisd` is MediaTek's key service (root, no sockets). `rpmb_svc` is secure storage for the TEE.
 - `libace_fr`, the `davs` and `ace_kvstore` groups, `factory_reset` are group and library names; none is a network feature.
 - `factory_reset`'s `fr_service` (`pre_factory_reset.sh`) stays: disabled, started by nothing.
-- The settings page's "Download from Amazon" (hassmic `davs.c`, `dha.c`) needs `fireos-dha`, `tokend` and the DHA libraries and does
-  not work any more. Wake words are the ones already on the Echo.
+- The settings page's "Download from Amazon" (hassmic `davs.c`, `dha.c`) needed `fireos-dha`, `tokend` and the DHA libraries and
+  could not work any more; its code is gone from hassmic (2026-10-22, see "What was removed from hassmic itself"). Wake words are the ones already on the Echo.
 
 ### Tools that were not on the Echo
 
@@ -273,7 +273,8 @@ the libraries build at run time. A file's use cannot be proven from outside; the
 ## What you lose
 
 - Alexa. (hassmic replaced it before; now `alexa-on.sh` and `MODE=stock-online` cannot bring it back either.)
-- "Download from Amazon" on the settings page: new wake words, the sound-detection and whisper models.
+- "Download from Amazon" on the settings page (code removed too): new wake words, the newer sound-detection model and the whisper model, and with it the whisper detection feature.
+- Online updates from GitHub (code removed): updates are pushed from your PC (`scripts/ota-push.sh`, over Wi-Fi or USB/adb); root accepts only your `update.pub`.
 - Amazon's firmware updates (they were blocked already).
 - The stock factory reset through the button; hassmic's works (action button held 10 s, the HA button, the settings page).
 - The automatic reboot after a week of high memory (`perfrecoveryd`). With hassmic at about 30 MB and 385 MB available it has not
@@ -318,6 +319,21 @@ variant), `dnsmasq` / `hostapd` (the stock firewall script and the supplicant na
 
 What is left, file by file and service by service, is in [`devices/donut/SYSTEM.md`](../devices/donut/SYSTEM.md) and `devices/donut/system-manifest.tsv` (1452 entries: 1291 required, 54 by-name, 107 platform, none unknown).
 
+## What was removed from hassmic itself
+
+With the services gone, the parts of hassmic that depended on them are removed too (2026-10-22), so no setting, entity or code is left that cannot work:
+
+| removed | what it was | now |
+|---|---|---|
+| `davs.c`, `dha.c`, the page's "Download from Amazon", `scripts/artifacts.sh`, `tools/davs-*.py`, `davs-spy.sh`, `curlspy` | registering the Echo to an Amazon account to download wake word sets and models | wake words: the one on the Echo, microWakeWord, or sets copied by hand / "Copy models" |
+| whisper detection (`whisper*.c`, the "Last request whispered" sensor, the setting) | answered-in-a-whisper detector, with a model only that download served | gone; no model was on the Echo |
+| online updates (`update.c`, the "Online updates" select, the firmware *update* entity, `ota_handoff`) | the Echo fetched hassmic releases from GitHub | `scripts/ota-push.sh` over Wi-Fi or USB; "Firmware" is now a text sensor with the running version |
+| the groups `drmrpc`, `keystore` of the daemon (`DAEMON_GROUPS`) | the secure hardware that signed the Amazon registration | hassmic no longer opens it |
+| Amazon's DHA noise filter in `clock.c` | hid three log lines of the attestation module | nothing to hide |
+
+Kept: sound detection (the firmware's own model, off by default, 1.9 MB), timers, Drop In, arbitration, Bluetooth, microWakeWord.
+Old exports that name `online_updates` or `whisper_detection` still import: those lines are ignored.
+
 ## Recovery
 
 | the Echo | how to bring it back |
@@ -351,4 +367,4 @@ Wi-Fi, only USB is left, so solder the USB wires before experimenting.
   `ace_sensorsd` had no client and was removed and tested; `ace_thermald` and `kisd` have no client either but protect the hardware and the keys.
 - Decided against a dead-man switch for now (the USB wires are the safety net); idea: after `apply`, a flag that makes `main.sh` put the quarantine back and reboot when the Echo has no IP address after a few minutes (cleared by `verify`).  Until then the USB wires are the safety net.
 - `light blue flashes until Home Assistant is connected` and AirPlay 2 are in PLAN.md.
-- A tidy-up of hassmic's own dead code for what is gone (`davs.c`, `dha.c`, the `alexa-*` scripts) has not been done.
+- The `alexa-*` helper scripts are still in the tree (they have nothing left to start).

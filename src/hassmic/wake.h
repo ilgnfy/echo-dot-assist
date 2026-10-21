@@ -28,10 +28,6 @@ void wake_close(int slot);             /* -1: every slot */
 /* Where the last accepted keyword (whichever slot) lies on the clock of Amazon's front end (ms, 16 bit, wraps), which
  * the engine reads from the stream itself.  0: not known (no such marks in the stream, PC build). */
 int  wake_afe_times(long *start, long *end);
-/* The engine's attributes line (JSON: wakeword_ecids, aed_ecids, ...), NULL without an engine.  DAVS asks for model
- * sets with the ids of the engine that will load them; an older engine (radar's) cannot load a set it did not name. */
-const char *wake_attributes(void);
-
 /* the engines (wake.c picks, per slot); attributes stay the vendor engine's; property: every slot of the engine */
 struct wake_engine {
     int  (*open)(int slot, const char *model, wake_cb cb);

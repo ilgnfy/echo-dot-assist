@@ -46,7 +46,6 @@
 #include "ring.h"
 #include "ringdesign.h"
 #include "ledq.h"
-#include "davs.h"
 #include "dropin.h"
 #include "micdenoise.h"
 #include "earsup.h"
@@ -60,7 +59,6 @@
 #include "sendspin.h"
 #include "sounds.h"
 #include "sound.h"
-#include "whisper.h"
 #include "settings.h"
 #include "web.h"
 #include "board.h"
@@ -855,28 +853,6 @@ static void on_sound(const char *const *types, int n)    /* detector thread */
     pthread_mutex_unlock(&core_lock);
 }
 
-/* Whisper detection (whisper.h, docs/re-whisper.md): each request's mic audio, from the start of streaming to Home
- * Assistant's VAD end, is scored once; the binary sensor says whether the last one was whispered, for the conversation
- * agent's prompt template.  The result comes within milliseconds of the end of speech, while speech to text still
- * runs, so it is in Home Assistant before the agent's prompt is rendered.  Without the DAVS model there is no sensor. */
-static atomic_int whisper_eou;              /* core_mic_off: the end of speech came (not a cancel or timeout) */
-static atomic_int whisper_last = -2;        /* core_whispered */
-
-int core_whispered(void) { return atomic_load(&whisper_last); }
-static int whisper_model;
-static atomic_int whisper_enabled = 1;               /* the settings page's "Whisper detection" */
-int  core_whisper_model(void) { return whisper_model; }
-void core_whisper_enable(int on) { atomic_store(&whisper_enabled, on != 0); }
-
-static void on_whisper(int whispered, int confidence, int threshold)    /* detector thread */
-{
-    fprintf(stderr, "whisper: %s (confidence %d, threshold %d)\n", whispered ? "whispered" : "not whispered", confidence, threshold);
-    atomic_store(&whisper_last, whispered);
-    pthread_mutex_lock(&core_lock);
-    if (connected && proto->whispered) proto->whispered(whispered);
-    pthread_mutex_unlock(&core_lock);
-}
-
 static void mute_update(int was, int sound)   /* lock held: ring, sound + Home Assistant follow the effective state */
 {
     int now = core_muted();
@@ -921,7 +897,7 @@ static void mic_stopped(void)
     denoise_frames = 0; denoise_ns = 0;
 }
 
-void core_mic_off(void) { atomic_store(&whisper_eou, 1); atomic_store(&streaming, 0); mic_stopped(); }
+void core_mic_off(void) { atomic_store(&streaming, 0); mic_stopped(); }
 
 void core_restart_after(void) { barge_in = 1; barge_from = 0; }
 
@@ -2326,7 +2302,6 @@ static void *capture_thread(void *arg)
 {
     FILE *dump = NULL;
     int sound_running = 0;                  /* the decoder is open: only this thread opens, feeds and closes it */
-    int whisper_on = 0;                     /* a whisper detector takes this request's audio */
     (void)arg;
     while (!atomic_load(&quit)) {
         const void *pcm; int n = cap_read(&pcm);
@@ -2376,15 +2351,6 @@ static void *capture_thread(void *arg)
             } else { sound_close(); sound_running = 0; }
         }
         if (sound_running) sound_feed(pcm, n / 2);
-        if (atomic_load(&whisper_last) != -2) {     /* a model: what streams to the pipeline is one request */
-            int s = atomic_load(&streaming);
-            if (s && !whisper_on && atomic_load(&whisper_enabled)) {             /* the position lines it up with the capture dump's */
-                atomic_store(&whisper_eou, 0); whisper_begin(); whisper_on = 1;
-                fprintf(stderr, "whisper: request from capture sample %lld\n", atomic_load(&cap_bytes) / 2 - n / 2);
-            }
-            if (whisper_on && s) whisper_feed(pcm, n / 2);
-            if (whisper_on && !s) { whisper_end(atomic_exchange(&whisper_eou, 0)); whisper_on = 0; }
-        }
         if (atomic_load(&dropin_live)) {               /* a Drop In: the call gets the mic as the pipeline does; muted, silence */
             static int16_t zeros[1024];
             int own = atomic_load(&earcon_sounding) || atomic_load(&sounds_pending) || mono_ms() < atomic_load(&earcon_heard_until)
@@ -2511,8 +2477,6 @@ int main(int argc, char **argv)
         wake_load_second();
         wake_loaded_set();
     }
-    if (whisper_open(on_whisper) == 0) { atomic_store(&whisper_last, -1); whisper_model = 1; }
-    else fprintf(stderr, "whisper: no model, no whisper detection (the settings page's Download from Amazon gets it)\n");
     static const struct arb_hooks arb_hooks = { arb_send_key, arb_notify, arb_request, arb_paired, arb_scan, dropin_message };
     if (arb_port && core_local_wake && proto->arb_send && arb_start(arb_port, core_node_name(), &arb_hooks)) fprintf(stderr, "arbitration: not available\n");
     if (dropin_port && arb_running() && dropin_start(dropin_port)) fprintf(stderr, "drop in: not available\n");
@@ -2533,7 +2497,6 @@ int main(int argc, char **argv)
     if (use_bt) improv_start(&improv_hooks);                 /* setup over Bluetooth, when there is no network (improv.c) */
     if (ota_port) ota_start(ota_port);
     pthread_mutex_lock(&core_lock); settings_load(); settings_preset(); pthread_mutex_unlock(&core_lock);    /* whatever the protocol */
-    davs_start();                                             /* Amazon login for artifact downloads (settings page) */
     static const struct web_hooks web_hooks = { web_attention, web_approved };
     if (core_web_port && web_start(core_web_port, &web_hooks)) { fprintf(stderr, "web: not available\n"); core_web_port = 0; }
 

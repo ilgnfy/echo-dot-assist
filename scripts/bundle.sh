@@ -2,8 +2,7 @@
 # Packs and signs an update bundle from a build of one model: what scripts/ota-push.sh pushes and CI publishes.
 #   [DEVICE=<codename>] scripts/bundle.sh KEY VERSION       -> build/<codename>/hassmic.bundle and hassmic.bundle.sig
 # Needs that model's binaries in build/<codename>/ first: `make all`, or a release's (scripts/lib/build.sh).
-# keys/release.pub rides along: the key of the project's releases, which the Echo then accepts for the updates hassmic
-# downloads itself, once a channel is picked on the settings page (scripts/system/main.sh).
+# keys/release.pub rides along (the key CI signs its bundles with; the Echo itself trusts only the owner's update.pub).
 set -e
 cd "$(dirname "$0")/.."
 . scripts/lib/device.sh; device_load

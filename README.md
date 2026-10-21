@@ -49,7 +49,6 @@ how to add one: [`devices/`](devices/README.md).
 | Light ring animations of your own       | –                              | [drawn on the settings page](docs/GUIDE.md#buttons-and-light-ring), for each of the Echo's |
 | Louder speaker (Echo Dot 2, Echo 2, Echo Dot 3) | –                      | [up to +12 dB](docs/GUIDE.md#settings-page) on the settings page (Echo Dot 3: +2 dB) |
 | Sound detection (smoke alarm, glass, …) | Alexa Guard, checked in the cloud | [on the Echo](docs/GUIDE.md#sound-detection), less reliable |
-| Whisper detection                       | answers in a whisper           | [a sensor](docs/GUIDE.md#whisper-detection) for your conversation agent |
 | Motion sensor                           | –                              | [from the Wi-Fi signal](docs/GUIDE.md#wi-fi-motion), experimental |
 | Wi-Fi setup from a phone                | Alexa app                      | [Home Assistant app](docs/GUIDE.md#setting-up-from-a-phone) |
 | Talks to Amazon                         | always                         | **never** (firewalled)                                |
@@ -132,19 +131,15 @@ names itself after its model and MAC address ("Echo Dot 3 5695c4"); give it your
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/update-dark.svg">
-  <img alt="An update comes from your PC (signed with your key) or from Home Assistant (a GitHub release, signed with the release key). Root checks the signature: a bad one is refused. The new version starts and tests itself within 30 seconds; if it passes it is kept for good, if it fails the Echo falls back to the last copy that worked." src="docs/img/update-light.svg">
+  <img alt="An update comes from your PC, signed with your key (over Wi-Fi, or adb/USB). Root checks the signature: a bad one is refused. The new version starts and tests itself within 30 seconds; if it passes it is kept for good, if it fails the Echo falls back to the last copy that worked." src="docs/img/update-light.svg">
 </picture>
 
-- **Online, installed from Home Assistant**: pick a channel under "Online updates" on the Echo's settings page. `release` gets releases (the
-  `release` branch), `beta` also every build of `main` that changes the Echo's software, `off` (the default) nothing.
-  The Echo's firmware entity then shows new versions and installs them. ESPHome mode only. The Echo downloads them
-  itself, so it needs internet access to GitHub; the page checks that before it takes a channel.
-- **From your PC**: `git pull`, then `scripts/ota-push.sh <echo-ip>` (it remembers the address). It builds, or takes
+- **From your PC** (the only way: the Echo fetches nothing from the internet): `git pull`, then `scripts/ota-push.sh <echo-ip>` (it remembers the address). It builds, or takes
   that commit's build from GitHub as the setup does, signs with your `secrets/update.key` and pushes over Wi-Fi
   (TCP 28929).
 
-Either way a broken update cannot strand the Echo: until a new version has passed its self test, the Echo falls back
-to the last one that worked. What changed: [CHANGELOG.md](CHANGELOG.md). What online updates trust:
+A broken update cannot strand the Echo: until a new version has passed its self test, the Echo falls back
+to the last one that worked. What changed: [CHANGELOG.md](CHANGELOG.md). What updates trust:
 [security](docs/SECURITY.md#updates).
 
 ## When something is wrong
@@ -214,8 +209,8 @@ Every Amazon daemon that is left lacks Android's `inet` group, so the kernel ref
 
 The guided setup has two more steps for it, **Back up the Echo** (2.2 GB, verified) and **Remove Amazon's services**
 (moves the files, reboots, checks the microphone and asks for the wake word; deleting the moved files for good is a
-separate question that defaults to no). You lose Alexa, "Download from Amazon" (wake words are the ones on the Echo) and
-Amazon's stock factory reset. What was removed and why, what stays, the traps (the mixer waits 20 s on a service that is
+separate question that defaults to no). You lose Alexa, the page's "Download from Amazon" (removed from this fork: the wake words are the ones on the Echo,
+plus microWakeWord's), online updates from GitHub (removed: updates are pushed from your PC) and Amazon's stock factory reset. What was removed and why, what stays, the traps (the mixer waits 20 s on a service that is
 gone unless a stand-in library is installed), recovery and how to port it:
 **[docs/cloud-free.md](docs/cloud-free.md)**.
 

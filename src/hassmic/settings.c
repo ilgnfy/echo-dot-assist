@@ -10,7 +10,6 @@
 #include "sendspin.h"
 #include "sound.h"
 #include "spkgain.h"
-#include "update.h"
 #include "wifimotion.h"
 #include "statefile.h"
 #include <ctype.h>
@@ -43,7 +42,7 @@ const int bt_lang_count = (int)(sizeof bt_langs / sizeof bt_langs[0]);
 static const char *bt_lang_codes[sizeof bt_langs / sizeof bt_langs[0]];
 
 static int mic_level = MICGAIN_LEVEL, bt_lang;
-static int bt_audio = 1, bt_speaker, whisper = 1;      /* features kept here; bt_speaker's default: settings_load */
+static int bt_audio = 1, bt_speaker;      /* features kept here; bt_speaker's default: settings_load */
 static int light_sensor;                                /* off: auto brightness moved the level in HA's history all day (forum, 2026-10-15) */
 static int bt_stay;                                     /* a2dp.c gets it only while the feature is on: off drops the link */
 static int wake_events;                                 /* off: an event per near miss is HA history most homes never read */
@@ -53,8 +52,8 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 
 /* ---------------------------------------------------------------- the table */
 
-enum id { WAKE_ENGINE, MIC_LEVEL, DENOISE, WAKE_SOUND, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_STOP_ANY, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WAKE_EVENTS, WIFI_MOTION,
-          WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, UPDATES, HTTPS_VERIFY, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT,
+enum id { WAKE_ENGINE, MIC_LEVEL, DENOISE, WAKE_SOUND, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_STOP_ANY, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WAKE_EVENTS, WIFI_MOTION,
+          WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, HTTPS_VERIFY, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET, NSET };
 
@@ -85,7 +84,6 @@ static const struct setting table[NSET] = {
     [ARB_WINDOW]  = { "arbitration_window", "Arbitration window", "Features", "ms", S_INT, 100, 1000, 1, 0 },
     [ARB_OFFSET]  = { "arbitration_offset", "Kiosk Satellite loudness offset", "Features", "dB", S_INT, -20, 20, 1, 0 },
     [SOUND]       = { "sound_detection", "Sound detection", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
-    [WHISPER]     = { "whisper_detection", "Whisper detection", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     /* proto_esphome.c's "Wake word" event entity (core_wake_events, issue #48) */
     [WAKE_EVENTS] = { "wake_events", "Wake word events", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     [WIFI_MOTION] = { "wifi_motion", "Wi-Fi motion (experimental)", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
@@ -103,7 +101,6 @@ static const struct setting table[NSET] = {
     /* dropin.c keeps them in memory, state/config on disk */
     [DROPIN]      = { "drop_in", "Drop In", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     [DROPIN_ANSWER] = { "drop_in_answer", "Drop In answers", "Features", NULL, S_CHOICE, 0, 0, 1, 0 },
-    [UPDATES]     = { "online_updates", "Online updates", "System", NULL, S_CHOICE, 0, 0, 1, 0 },
     /* https.c keeps it: media from a Home Assistant that serves HTTPS itself (issue #30) */
     [HTTPS_VERIFY] = { "https_verify", "Check HTTPS certificates", "System", NULL, S_BOOL, 0, 1, 1, 0 },
     [SS_UNPAIRED] = { "sendspin_unpaired", "Music Assistant without pairing", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
@@ -139,7 +136,6 @@ static int present(enum id i)
 {
     switch (i) {
     case BT_ANNOUNCE: case BT_LANG: case BT_AUDIO: case BT_SPEAKER: case BT_OUT_DELAY: case BT_OUT_AWAKE: case BT_OUT_STAY: return ble_present();
-    case WHISPER: return core_whisper_model();
     case SOUND: return sound_model() != SOUND_NONE;               /* the firmware has one on every model so far */
     case LED_AUTO: case LIGHT_SENSOR: return core_lux() == core_lux();      /* a light sensor: not NAN */
     case WIFI_MOTION: case WIFI_SENS: return wifimotion_present();
@@ -172,7 +168,6 @@ int settings_choices(const struct setting *s, const char *const **names)
     case BT_LANG:
         for (int i = 0; i < bt_lang_count; i++) bt_lang_codes[i] = bt_langs[i].code;
         *names = bt_lang_codes; return bt_lang_count;
-    case UPDATES: *names = update_channels; return 3;
     case ARB_MODE: *names = arb_modes; return 2;
     case WAKE_ENGINE: *names = wake_engines; return 3;
     case DROPIN_ANSWER: *names = dropin_answers; return 2;
@@ -199,7 +194,6 @@ int settings_get(const struct setting *s)
     case SOUND: return core_sound(-1);
     case WIFI_MOTION: return wifimotion_enable(-1);
     case WIFI_SENS: return wifimotion_sensitivity(-1);
-    case UPDATES: return update_channel(-1);
     case HTTPS_VERIFY: return https_verify(-1);
     case ARB: return arb_arbitrate(-1);
     case ARB_MODE: return arb_mode(-1);
@@ -213,7 +207,6 @@ int settings_get(const struct setting *s)
     case BT_OUT_DELAY: return a2dp_out_delay(-1);
     case BT_OUT_AWAKE: return btout_keep_awake(-1);
     case BT_OUT_STAY: return bt_stay;
-    case WHISPER: return whisper;
     case LIGHT_SENSOR: return light_sensor;
     case WAKE_EVENTS: return wake_events;
     case DROPIN: return dropin_enable(-1);
@@ -248,7 +241,6 @@ static void put(enum id i, int v)
     case SOUND: core_sound(v); break;
     case WIFI_MOTION: wifimotion_enable(v); break;
     case WIFI_SENS: wifimotion_sensitivity(v); break;
-    case UPDATES: update_channel(v); break;
     case HTTPS_VERIFY: https_verify(v); break;
     case ARB: arb_arbitrate(v); break;                          /* arb.c keeps it */
     case ARB_MODE: arb_mode(v); break;
@@ -260,7 +252,6 @@ static void put(enum id i, int v)
     case BT_AUDIO: bt_audio = v; if (!v) a2dp_pair(0); break;                        /* paired phones still connect */
     case BT_SPEAKER:                                            /* back on the Echo, and the link goes */
         bt_speaker = v; a2dp_out_stay(bt_stay && v); if (!v && a2dp_out_enabled()) a2dp_out_enable(0); break;
-    case WHISPER: whisper = v; core_whisper_enable(v); break;
     case LIGHT_SENSOR: light_sensor = v; break;
     case WAKE_EVENTS: wake_events = v; break;
     case BT_OUT_DELAY: a2dp_out_delay(v); break;                    /* a2dp.c saves it */
@@ -330,10 +321,10 @@ void settings_save(void)
 /* The file before names (one line of numbers): 5 fields (before Bluetooth announcements), 6 (before do not disturb), 7
  * (before their language), 8 (before the mic level: the first three fields held noise suppression, auto gain and volume
  * multiplier for Home Assistant, which ignored them; unused since), 9 (before LED brightness: auto, as stock), 11 (before
- * sound detection: off), 12 (before Wi-Fi motion: off, default sensitivity), 14 (before online updates: off). */
+ * sound detection: off), 12 (before Wi-Fi motion: off, default sensitivity), 14 (online updates, gone: read and dropped). */
 static int load_old(void)
 {
-    int n, g, m, w, a = 1, d = 0, fmt = 0, la = 1, lb = -1, sd = 0, wm = 0, ws = WIFIMOTION_SENS_DEFAULT, uc = UPDATE_OFF; float v; char l[8] = "", p[300];
+    int n, g, m, w, a = 1, d = 0, fmt = 0, la = 1, lb = -1, sd = 0, wm = 0, ws = WIFIMOTION_SENS_DEFAULT, uc = 0; float v; char l[8] = "", p[300];
     FILE *f; path(p, sizeof p, "settings");
     if (getenv("HASSMIC_SETTINGS")) snprintf(p, sizeof p, "%s", getenv("HASSMIC_SETTINGS"));      /* tests */
     if (!(f = fopen(p, "r"))) return 0;
@@ -344,7 +335,7 @@ static int load_old(void)
         if (!la) { if (lb >= 0) core_led_brightness(lb); else core_led_auto(0); }  /* ledcontroller started its auto at boot */
         core_sound(sd != 0);
         wifimotion_enable(wm != 0); wifimotion_sensitivity(ws);
-        update_channel(uc);
+        (void)uc;
     }
     fclose(f);
     return 1;
@@ -422,6 +413,8 @@ int settings_bt_lang_index(int set) { if (set >= 0 && set < bt_lang_count) bt_la
 int settings_set(const char *name, const char *value, char *err, size_t errsz)
 {
     const struct setting *s = settings_find(name); int v;
+    /* gone settings, in exports of older builds: nothing to do (online updates came from GitHub, whisper detection from a model only Amazon served) */
+    if (!s && (!strcmp(name, "online_updates") || !strcmp(name, "whisper_detection"))) return 0;
     if (!s) { snprintf(err, errsz, "%s: no such setting on this Echo", name); return -1; }
     if (parse(s, value, &v)) { snprintf(err, errsz, "%s: \"%s\" is not a value it takes", name, value); return -1; }
     int was = settings_get(s);

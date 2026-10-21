@@ -1,27 +1,24 @@
 /*
- * Artifacts from Amazon's DAVS (scripts/artifacts.sh puts them on one Echo from the PC) copied between Echos by the settings
- * page, through the browser: it reads them in pieces from one Echo and writes them to another, both over signed requests
+ * Models (a wake word set Amazon's firmware ships or one put on an Echo by hand, a microWakeWord model) copied between Echos by the
+ * settings page, through the browser: it reads them in pieces from one Echo and writes them to another, both over signed requests
  * whose answers are signed as well (web.c), so nobody on the network can change them on the way.
  *
  * What there is, by id:
  *   wake:<name>  a wake word model set, models/<name>/ (Home Assistant offers each in the wake word select)
- *   sound        Amazon's newer sound detection model, aed/ (sound_pryon.c takes it over the firmware's)
- *   whisper      the whisper detection model, whisper/ (whisper_pryon.c)
  *   mww:<id>     a microWakeWord model, state/mww/<id>/ (mww_store.c): not Amazon's, but copied the same way
- * Each is a folder of files, with at most two levels of folders inside: Amazon's whisper model keeps its networks in
- * whisper_components/, some wake word sets (alexa-de-DE) theirs in BDPGeneratedFiles/, and the newer ones (alexa-de-DE,
- * every en-US set, 2026-10) configs in nttfusionconfig/ntt_conv/.  A file's name is then its path, "sub/file" or
+ * Each is a folder of files, with at most two levels of folders inside: some wake word sets keep theirs in BDPGeneratedFiles/,
+ * the newer ones configs in nttfusionconfig/ntt_conv/.  A file's name is then its path, "sub/file" or
  * "sub/sub/file", each part a name as good_name() takes it, 127 characters in all.  The digest: BLAKE2b-256 over, file by file in name order,
  * "name\0size\0" and the content; the same folder on two Echos has the same digest.  Kept per folder until a file's size or time changes:
  * hashing a 24 MB set takes seconds on these CPUs.
  *
  * Writing: begin (the files, their sizes, the digest; enough free space for the copy and root's copy of it), pieces into
- * state/artifacts/<dir>/ (dir: wake.<name>, sound, whisper), commit (every file whole, no other file, the digest right;
- * a wake word set must also load in this Echo's own engine, pryon_test, as scripts/artifacts.sh checks: the Echo 2's
+ * state/artifacts/<dir>/ (dir: wake.<name>, mww.<id>), commit (every file whole, no other file, the digest right;
+ * a wake word set must also load in this Echo's own engine, pryon_test as well: the Echo 2's
  * older engine cannot load every set), then install: state/artifacts/request names what is ready, and root's watcher
  * (main.sh) runs artifact-install.sh, which reads the files as the daemon's user (so nothing staged here can point root
  * at a file of its own), copies them (and their folders) into a fresh root-owned folder, swaps it in and restarts hassmic: the wake word list
- * and the whisper model are read at start.  The models folders are root's (adb wrote them), hence the detour.
+ * is read at start.  The models folders are root's (adb wrote them), hence the detour.
  * microWakeWord's models are hassmic's own: commit checks that one loads in our interpreter and puts it in place itself.
  */
 #include "artifacts.h"
@@ -87,12 +84,8 @@ static int resolve(const char *id, char *dir, size_t dcap, char *stage, size_t s
 {
     if (!strncmp(id, "wake:", 5) && good_name(id + 5)) {
         snprintf(dir, dcap, "%s/%s", models_dir(), id + 5); snprintf(stage, scap, "%s/artifacts/wake.%s", state_dir(), id + 5); *kind = "wake";
-    } else if (!strcmp(id, "sound")) {
-        snprintf(dir, dcap, "%s", env_or("HASSMIC_AED", "/data/local/hassmic/aed")); snprintf(stage, scap, "%s/artifacts/sound", state_dir()); *kind = "sound";
     } else if (!strncmp(id, "mww:", 4) && mww_good_id(id + 4)) {
         snprintf(dir, dcap, "%s/%s", mww_dir(), id + 4); snprintf(stage, scap, "%s/artifacts/mww.%s", state_dir(), id + 4); *kind = "mww";
-    } else if (!strcmp(id, "whisper")) {
-        snprintf(dir, dcap, "%s", env_or("HASSMIC_WHISPER", "/data/local/hassmic/whisper")); snprintf(stage, scap, "%s/artifacts/whisper", state_dir()); *kind = "whisper";
     } else return -1;
     return 0;
 }
@@ -177,7 +170,7 @@ static size_t one_json(char *o, size_t cap, const char *id, int first)
     if (resolve(id, dir, sizeof dir, stage, sizeof stage, &kind) || (k = list_dir(dir, f, MAX_FILES, 0)) <= 0) return 0;
     for (int i = 0; i < k; i++) {
         total += f[i].size;
-        manifest |= !strcmp(f[i].name, "pryon.manifest") || !strcmp(f[i].name, "pryon_whisper.manifest") || (!strcmp(kind, "mww") && !strcmp(f[i].name, "manifest.json"));
+        manifest |= !strcmp(f[i].name, "pryon.manifest") || (!strcmp(kind, "mww") && !strcmp(f[i].name, "manifest.json"));
     }
     if (!manifest || cached_digest(dir, f, k, d)) return 0;
     hex(dh, d, 32);
@@ -202,13 +195,12 @@ size_t art_list_json(char *o, size_t cap)
     J("{\"artifacts\":[");
     if ((d = opendir(models_dir()))) {
         while ((e = readdir(d))) {
-            if (!good_name(e->d_name)) continue;                   /* .try-*: scripts/artifacts.sh testing one */
+            if (!good_name(e->d_name)) continue;                   /* .try-*: one being tried */
             snprintf(id, sizeof id, "wake:%.63s", e->d_name);
             size_t k = one_json(o + n, cap - n, id, first); n += k; if (k) first = 0;
         }
         closedir(d);
     }
-    for (int i = 0; i < 2; i++) { size_t k = one_json(o + n, cap - n, i ? "whisper" : "sound", first); n += k; if (k) first = 0; }
     if ((d = opendir(mww_dir()))) {
         while ((e = readdir(d))) {
             if (!mww_good_id(e->d_name)) continue;                 /* .new-* / .old-*: one being swapped in */
@@ -386,58 +378,6 @@ static int try_load(const char *manifest)
     if (pid > 0) { unsigned char r; if (read(pfd[0], &r, 1) == 1) code = r; }
     close(pfd[0]);
     return code;
-}
-
-/* where a copy of ID is staged (a download unpacks straight into it, then art_staged lists it) */
-int art_stage_dir(const char *id, char *dir, size_t cap)
-{
-    char model[300]; const char *kind;
-    return resolve(id, model, sizeof model, dir, cap, &kind);
-}
-
-int art_room(long long need, char *err, size_t errsz)
-{
-    long fr = free_bytes();
-    if (fr < 0 || need + MARGIN <= fr) return 0;
-    snprintf(err, errsz, "not enough space on this Echo: %ld MB free, %lld MB needed", fr >> 20, (need + MARGIN) >> 20);
-    return -1;
-}
-
-/* whatever is staged for ID goes: the folder and its side files (a download starts clean) */
-void art_unstage(const char *id)
-{
-    char model[300], stage[300]; const char *kind;
-    if (resolve(id, model, sizeof model, stage, sizeof stage, &kind)) return;
-    pthread_mutex_lock(&lk);
-    unstage(stage);
-    pthread_mutex_unlock(&lk);
-}
-
-/* A download unpacked straight into the staging folder (davs.c): write what art_commit will check against, from the
- * files as they arrived: the list, the digest.  A link, folders deeper than two or a strange name is refused here already. */
-int art_staged(const char *id, char *err, size_t errsz)
-{
-    char dir[300], stage[300], p[320], dh[65]; const char *kind; struct file f[MAX_FILES]; uint8_t d[32]; int n;
-    FILE *x;
-    if (resolve(id, dir, sizeof dir, stage, sizeof stage, &kind)) { snprintf(err, errsz, "not an artifact"); return -1; }
-    pthread_mutex_lock(&lk);
-    n = list_dir(stage, f, MAX_FILES, 1);
-    if (n <= 0 || digest(stage, f, n, d)) {
-        int stray = n < 0;
-        unstage(stage);
-        pthread_mutex_unlock(&lk);
-        snprintf(err, errsz, stray ? "the download holds a link, folders too deep or a file this Echo cannot keep"
-                                   : "cannot read what arrived");
-        return -1;
-    }
-    hex(dh, d, 32);
-    snprintf(p, sizeof p, "%s.expect", stage);
-    if (!(x = fopen(p, "w"))) { pthread_mutex_unlock(&lk); snprintf(err, errsz, "cannot write %s", p); return -1; }
-    fprintf(x, "%s\n", dh);
-    for (int i = 0; i < n; i++) fprintf(x, "%s %ld\n", f[i].name, f[i].size);
-    fclose(x);
-    pthread_mutex_unlock(&lk);
-    return 0;
 }
 
 int art_commit(const char *id, char *err, size_t errsz)

@@ -25,7 +25,7 @@ BUILD   := $(shell git describe --always --dirty --exclude='*' 2>/dev/null || ec
 BUILD_TIME := $(shell LC_ALL=C git log -1 --format=%cd --date=format:'%b %e %Y %H:%M:%S' 2>/dev/null || echo unknown)
 # The version is the commit's time in UTC, 2026.10.02.091530: it only goes up, beta and release share it, and Home
 # Assistant compares it as numbers.  A build CI publishes (RELEASE=1) reports just that; any other reports
-# VERSION+BUILD (git describe), which online updates take for that version.
+# VERSION+BUILD (git describe).
 VERSION := $(shell TZ=UTC0 git log -1 --format=%cd --date=format-local:%Y.%m.%d.%H%M%S 2>/dev/null || echo 0)
 DEFS    := -DVERSION='"$(VERSION)"' -DBUILD='"$(BUILD)"' -DBUILD_TIME='"$(BUILD_TIME)"' $(if $(RELEASE),-DRELEASE)
 CFLAGS  := -O2 -Wall -Wextra -fPIE -Isrc/include $(DEFS)
@@ -43,7 +43,7 @@ FORCE:
 # A model without the Amazon mixer or Pryon has no use for the tools built on them: they drop out with the library.
 BIN := $(OUT)/hassmic $(OUT)/runas $(OUT)/otatool \
        $(if $(filter libmixerAPI.so,$(LIBS)),$(OUT)/mixcap $(OUT)/mixplay $(OUT)/latency) \
-       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test) \
+       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test) \
        $(if $(PERF_STUB),$(OUT)/libperf_cpu_info_parser.so)
 
 .DEFAULT_GOAL := all
@@ -152,17 +152,6 @@ $(OUT)/libperf_cpu_info_parser.so: src/stubs/perf_stub.c
 	@mkdir -p $(OUT)
 	$(CC) -O2 -Wall -Wextra -fPIC -shared -nostdlib -fuse-ld=lld -Wl,-soname,libperf_cpu_info_parser.so -Wl,--hash-style=both -Wl,--build-id=none -Wl,-z,noexecstack $< -o $@
 
-# not part of "all": LD_PRELOAD shim to see a stock daemon's libcurl requests (see the file)
-$(OUT)/libcurlspy.so: src/tools/curlspy.c
-	@mkdir -p $(OUT)
-	$(CC) $(CFLAGS) -fPIC -shared $< -o $@ -fuse-ld=lld -ldl
-
-# not part of "all": what the Echo's device attestation HAL answers (the key, its fields, a signature), for the
-# questions dha.c was written against
-$(OUT)/dha_test: src/tools/dha_test.c
-	@mkdir -p $(OUT)
-	$(CC) $(CFLAGS) $< -o $@ -pie -fuse-ld=lld -ldl
-
 $(OUT)/pryon_test: src/tools/pryon_test.c src/include/pryon_api.h $(STOCK)/libpryon.so $(STOCK)/libz.so
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) $(STOCK)/libpryon.so $(STOCK)/libz.so
@@ -171,18 +160,12 @@ $(OUT)/aed_test: src/tools/aed_test.c src/include/pryon_api.h $(STOCK)/libpryon.
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) $(STOCK)/libpryon.so
 
-$(OUT)/whisper_test: src/tools/whisper_test.c src/include/pryon_api.h $(STOCK)/libpryon.so
-	@mkdir -p $(OUT)
-	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) $(STOCK)/libpryon.so
-
 # Sound detection (sound.h) runs on the same engine as the wake word: a model with Pryon has it, the PC build fakes it.
 SOUND := $(if $(filter %wake_pryon.c,$(WAKE)),src/hassmic/sound_pryon.c,src/hassmic/sound_none.c)
-# So does whisper detection (whisper.h), with a model from Amazon (scripts/artifacts.sh).
-WHISPER := $(if $(filter %wake_pryon.c,$(WAKE)),src/hassmic/whisper_pryon.c,src/hassmic/whisper_none.c)
 
 RNNOISE := $(addprefix src/third_party/rnnoise/,denoise.c rnn.c rnn_data.c pitch.c kiss_fft.c celt_lpc.c)
 HASSMIC := src/hassmic/main.c src/hassmic/wyoming.c src/hassmic/proto_wyoming.c src/hassmic/proto_esphome.c src/hassmic/buttons.c src/hassmic/ring.c src/hassmic/ringdesign.c src/hassmic/ledq.c \
-           src/hassmic/sendspin.c src/hassmic/arb.c src/hassmic/dropin.c src/hassmic/ble.c src/hassmic/ble_crypto.c src/hassmic/a2dp.c src/hassmic/a2dp_codecs.c src/hassmic/sbc.c src/hassmic/btout.c src/hassmic/ota.c src/hassmic/update.c src/hassmic/https.c src/hassmic/adbwifi.c src/hassmic/wifi.c src/hassmic/netaddr.c src/hassmic/improv.c src/hassmic/wifimotion.c src/hassmic/spkgain.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/hassmic/hash.c src/hassmic/sounds.c src/hassmic/micgain.c src/hassmic/micdenoise.c src/hassmic/earsup.c src/hassmic/settings.c src/hassmic/web.c src/hassmic/artifacts.c src/hassmic/dha.c src/hassmic/davs.c src/hassmic/diag.c src/hassmic/clock.c src/hassmic/tz.c src/hassmic/statefile.c build/web_assets.c \
+           src/hassmic/sendspin.c src/hassmic/arb.c src/hassmic/dropin.c src/hassmic/ble.c src/hassmic/ble_crypto.c src/hassmic/a2dp.c src/hassmic/a2dp_codecs.c src/hassmic/sbc.c src/hassmic/btout.c src/hassmic/ota.c src/hassmic/https.c src/hassmic/adbwifi.c src/hassmic/wifi.c src/hassmic/netaddr.c src/hassmic/improv.c src/hassmic/wifimotion.c src/hassmic/spkgain.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/hassmic/hash.c src/hassmic/sounds.c src/hassmic/micgain.c src/hassmic/micdenoise.c src/hassmic/earsup.c src/hassmic/settings.c src/hassmic/web.c src/hassmic/artifacts.c src/hassmic/diag.c src/hassmic/clock.c src/hassmic/tz.c src/hassmic/statefile.c build/web_assets.c \
            src/hassmic/wake.c src/hassmic/wake_mww.c src/hassmic/mww_features.c src/hassmic/mww_model.c src/hassmic/mww_store.c \
            src/third_party/monocypher.c src/third_party/freeaptx.c $(RNNOISE)
 HASSMIC_H := $(wildcard src/hassmic/*.h src/include/*.h) build/.build-id
@@ -193,17 +176,17 @@ build/web_assets.c: tools/embed.py $(foreach w,$(WEB),$(firstword $(subst :, ,$(
 	@mkdir -p build
 	python3 tools/embed.py $@ $(WEB)
 
-$(OUT)/hassmic: $(HASSMIC) $(BOARD) $(AUDIO) $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(addprefix $(STOCK)/,$(LIBS))
+$(OUT)/hassmic: $(HASSMIC) $(BOARD) $(AUDIO) $(WAKE) $(SOUND) $(HASSMIC_H) $(addprefix $(STOCK)/,$(LIBS))
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -Isrc/hassmic $(filter %.c,$^) -o $@ $(LDFLAGS) -lm -ldl $(addprefix $(STOCK)/,$(LIBS))
 
-# PC build for protocol tests: file audio backend, no wake word (SIGUSR1 triggers), fake sound and whisper detection, identity of $(DEVICE).
-build/hassmic-host: $(HASSMIC) $(BOARD) src/hassmic/audio_file.c src/hassmic/wake_none.c src/hassmic/sound_none.c src/hassmic/whisper_none.c $(HASSMIC_H) build/.device
+# PC build for protocol tests: file audio backend, no wake word (SIGUSR1 triggers), fake sound detection, identity of $(DEVICE).
+build/hassmic-host: $(HASSMIC) $(BOARD) src/hassmic/audio_file.c src/hassmic/wake_none.c src/hassmic/sound_none.c $(HASSMIC_H) build/.device
 	@mkdir -p build
 	cc -O2 -Wall -Wextra $(DEFS) -Isrc/include -Isrc/hassmic $(filter %.c,$^) -o $@ -lpthread -lm -ldl -lopus -lz
 
 # ARM build with file audio but the device's wake word engine, for running under qemu-arm (tools/qrun.sh).
-$(OUT)/hassmic-qemu: $(HASSMIC) $(BOARD) src/hassmic/audio_file.c $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
+$(OUT)/hassmic-qemu: $(HASSMIC) $(BOARD) src/hassmic/audio_file.c $(WAKE) $(SOUND) $(HASSMIC_H) $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -Isrc/hassmic $(filter %.c,$^) -o $@ $(LDFLAGS) -lm -ldl $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
 
@@ -212,7 +195,7 @@ host: build/hassmic-host $(OUT)/hassmic-qemu build/otatool-host
 # Building blocks of the Sendspin client, checked against reference implementations (aiohttp, python noiseprotocol).
 UNIT := src/hassmic/hash.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/third_party/monocypher.c
 # One target per test, so make -j unit runs them side by side (tests/run.py does: most of them wait or compile).
-UNIT_TESTS := hash ws noise ble_crypto micgain wifimotion spkgain tz statefile ledq micdenoise earsup dha_jwt a2dp_codecs \
+UNIT_TESTS := hash ws noise ble_crypto micgain wifimotion spkgain tz statefile ledq micdenoise earsup a2dp_codecs \
 	sbc web_crypto ring_pack mww blueprint_dropin debloat_edit
 unit: $(addprefix unit-,$(UNIT_TESTS))
 unit-hash:
@@ -253,10 +236,6 @@ unit-micdenoise:
 unit-earsup:
 	@mkdir -p build
 	cc -O2 -Wall -Wextra -Isrc/hassmic tests/unit/earsup_test.c src/hassmic/earsup.c -lpthread -lm -o build/earsup_test && build/earsup_test
-unit-dha_jwt:
-	@mkdir -p build
-	cc -O2 -Wall -Isrc/hassmic -Isrc/include -include stdlib.h tests/unit/dha_hal_fake.c -shared -fPIC -o build/dha_hal_fake.so
-	cc -O2 -Wall -Isrc/hassmic -Isrc/include tests/unit/dha_jwt_test.c src/hassmic/dha.c src/hassmic/hash.c -o build/dha_jwt_test -ldl && build/dha_jwt_test build/dha_hal_fake.so
 unit-a2dp_codecs:
 	@mkdir -p build
 	cc -O2 -Wall -Isrc/hassmic tests/unit/a2dp_codecs_test.c src/hassmic/a2dp_codecs.c src/hassmic/sbc.c src/third_party/freeaptx.c -lm -ldl -lopus -o build/a2dp_codecs_test && build/a2dp_codecs_test

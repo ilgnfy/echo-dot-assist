@@ -141,6 +141,5 @@ static void pryon_close(int slot)
     PryonModelSet_Delete(model_set[slot]);
 }
 
-const char *wake_attributes(void) { return PryonApi_GetAttributes(); }
 
 const struct wake_engine wake_vendor = { pryon_open, pryon_feed, pryon_reset, pryon_property, pryon_close, pryon_afe_times };

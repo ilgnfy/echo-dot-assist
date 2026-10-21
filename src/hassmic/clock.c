@@ -128,33 +128,20 @@ static void put_all(int fd, const char *p, size_t n)
     while (n) { ssize_t w = write(fd, p, n); if (w < 0 && errno == EINTR) continue; if (w <= 0) return; p += w; n -= (size_t)w; }
 }
 
-/* Amazon's attestation module runs /system/bin/idme to read the raw identity store first; as the daemon's user that
- * fails with these three lines, four times per signing (davs.c's probe at start, every Amazon login), and it signs from
- * /proc/idme anyway (docs/re-davs-login.md).  Dropped when they come as that group, nowhere else.  The module itself
- * then warns that it cannot drop its groups (it does not run as root) and carries on: that line goes too. */
-static const char *const idme_noise[3] = { "Could not open /dev/block/mmcblk0boot1!", "Can't read the idme.", "system error occured while processing command" };
-static int dha_noise(const char *l)
-{
-    static const char at[] = "Error in hardware/amazon_hal/security/amzn_dha/";
-    return !strncmp(l, at, sizeof at - 1) && strstr(l, "[Warning: setgroups failed") && strstr(l, "continuing]");
-}
-
 static void forward(int in, int out)
 {
-    char buf[4096], line[2048 + 40]; size_t n = 0, pre = 0; int noise = 0;
+    char buf[4096], line[2048 + 40]; size_t n = 0;
     for (;;) {
         ssize_t r = read(in, buf, sizeof buf);
         if (r < 0 && errno == EINTR) continue;
         if (r <= 0) break;
         for (ssize_t i = 0; i < r; i++) {
-            if (!n) pre = n = stamp(line, 40);
+            if (!n) n = stamp(line, 40);
             int end = buf[i] == '\n';
             if (!end) line[n++] = buf[i];
             if (!end && n < sizeof line - 1) continue;
             line[n] = 0;
-            if (!strcmp(line + pre, idme_noise[noise])) noise = (noise + 1) % 3;
-            else if (dha_noise(line + pre)) noise = 0;
-            else { noise = 0; line[n++] = '\n'; put_all(out, line, n); }
+            line[n++] = '\n'; put_all(out, line, n);
             n = 0;
         }
     }

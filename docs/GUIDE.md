@@ -5,7 +5,7 @@ the [README](../README.md).
 
 - [Voice](#voice) · [Wake word](#wake-word) · [Several Echos](#several-echos)
 - [Buttons and light ring](#buttons-and-light-ring) · [Music](#music) · [Bluetooth proxy](#bluetooth-proxy)
-- [In Home Assistant](#in-home-assistant) · [Sound detection](#sound-detection) · [Whisper detection](#whisper-detection) · [Wi-Fi motion](#wi-fi-motion)
+- [In Home Assistant](#in-home-assistant) · [Sound detection](#sound-detection) · [Wi-Fi motion](#wi-fi-motion)
 - [Settings page](#settings-page) · [Setting up from a phone](#setting-up-from-a-phone) · [Factory reset](#factory-reset)
 - [hassmic.conf](#hassmicconf) · [adb over Wi-Fi](#adb-over-wi-fi) · [ESPHome or Wyoming](#esphome-or-wyoming)
 
@@ -78,9 +78,7 @@ Three engines, picked under "Wake word" on the [settings page](#settings-page):
 
 ### Amazon's wake words
 
-"Alexa" comes with the firmware. Others ("Echo", "Computer", …) only Amazon hands out: "Download from Amazon" on the
-settings page, or "Copy models" from another Echo. `scripts/artifacts.sh` from the PC is the old way, kept as a fallback
-(it registers the Echo to an Amazon account in the Alexa app for a few minutes and undoes it). Pick one in Home Assistant's wake word select. The same word in two languages
+"Alexa" comes with the firmware (this fork cannot fetch Amazon's others any more: "Copy models" moves sets between Echos). Pick one in Home Assistant's wake word select. The same word in two languages
 shows with its language and region ("Computer (de-DE)", "Computer (en-US)"). Only the word picked wakes the Echo:
 Amazon's English (US) "Computer", "Amazon" and "Ziggy" are one model that also knows the others and "Hey Disney".
 
@@ -90,7 +88,7 @@ Amazon's English (US) "Computer", "Amazon" and "Ziggy" are one model that also k
 Voice PE). Its small models were trained mostly on synthetic speech and never with the Echo's microphones: **expect
 more missed wake words**, above all from across the room or over music, and more false wakes. While it is on you also
 lose "<wake word>, stop", the extra sensitivity while the Echo plays, rings or speaks, Amazon's wake words, and the
-front end's energies in arbitration. Sound and whisper detection keep working.
+front end's energies in arbitration. Sound detection keeps working.
 
 Switching on, the page lists these costs and, on an Echo without a model yet, asks for one to start with: one of
 ESPHome's (fetched from GitHub by your browser) or your own `.tflite` with its `.json` manifest. The same section then
@@ -406,7 +404,6 @@ Echo announces itself again after 100 s without Home Assistant, then less and le
 |---|---|
 | Wake word arbitration (on by default) | Arbitration peers |
 | [Sound detection](#sound-detection) | Sound (event) |
-| [Whisper detection](#whisper-detection) | Last request whispered |
 | Wake word events (off by default) | Wake word (event): `detected` (the Echo took it), `near_miss` (Amazon's engine heard something close, did not wake; none with microWakeWord), `answered_elsewhere` (another Echo or satellite answered), `no_speech` (woke, nothing said). A `detected` followed by `no_speech` is a false wake. Nothing while muted. Near misses can come often while the TV plays: an entry in Home Assistant's history each |
 | [Wi-Fi motion](#wi-fi-motion) | motion sensor, sensitivity |
 | Light sensor (off by default) | Illuminance (the room's light in lux); "LED brightness" then also follows auto brightness, an entry in the logbook every few minutes. Off, it shows only levels you set |
@@ -422,7 +419,7 @@ Echo announces itself again after 100 s without Home Assistant, then less and le
 - "Wake sound removal" (experimental, under Features): off by default; takes the wake sound out of what the voice
   assistant gets (see [Voice](#voice)).
 - "Timers ring for": 1 minute by default, 10 s to 10 min, or until stopped.
-- Bluetooth announcements and their language, the online updates channel, debug access (adb over Wi-Fi), SoC
+- Bluetooth announcements and their language, debug access (adb over Wi-Fi), SoC
   temperature and CPU usage.
 - "Music Assistant without pairing": off by default, so only Sendspin servers paired with the token may play.
 
@@ -444,38 +441,7 @@ entity reports `smoke_or_co_alarm`, `glass_break`, `dog_bark`, `baby_cry`, `snor
 - Nothing is reported while muted, or for a window in which the Echo itself played something.
 - **Private**: it all happens on the Echo, only the event leaves it (a stock Echo uploads the recordings). About 13 % of
   one CPU core while on (Echo Dot 2).
-- Uses the firmware's model; Amazon's newest can replace it ("Download from Amazon", or `scripts/artifacts.sh` "Other
-  artifacts"; it scored the same so far). ESPHome only. Background: [re-aed.md](re-aed.md).
-
-## Whisper detection
-
-A stock Echo answers a whispered request in a whisper. Here the binary sensor "Last request whispered" tells your
-conversation agent, so it can answer the same way. It uses Amazon's whisper detector on the Echo with a model only
-Amazon hands out: "Download from Amazon" on the settings page, or `scripts/artifacts.sh <echo-ip>` ("Other artifacts" ›
-"Whisper detection"; over Wi-Fi, open debug access first). The model stays through updates; without it there is no sensor.
-
-The sensor is set when you stop speaking, before speech to text has finished, so the agent's prompt can read it. For
-example, in the LLM conversation agent's instructions. The template finds the sensor of whichever Echo you spoke to,
-so one prompt serves every Echo, whatever you named them:
-
-```jinja
-{%- set w = device_entities(llm_context.device_id) | select('search', '_last_request_whispered$') | first | default(none) %}
-{%- if w and is_state(w, 'on') %}
-The user whispered. Start your answer with the literal tag [whisper].
-{%- endif %}
-```
-
-Replace `[whisper]` with the markup your text to speech understands; Piper has none.
-
-> [!NOTE]
-> The sensor is reliable; the language model is less so. It may forget the tag or put it somewhere else, and nothing
-> on the Echo checks what it wrote. A missing tag means a normal answer. A misplaced one
-> may be read out aloud. Expect a whispered answer most of the time, not every time.
-
-- In tests (Echo Dot 2, German, 1–2 m) whispered commands scored 984–999 of 1000, spoken ones 0–18, quiet ones too.
-  Saying the wake word normally and whispering the rest is fine.
-- Sounds without words (breathing, rustling) can score high, but only what the pipeline took for a command is scored.
-- On the Echo, during your request only. ESPHome only. Background: [re-whisper.md](re-whisper.md).
+- Uses the firmware's model. ESPHome only. Background: [re-aed.md](re-aed.md).
 
 ## Wi-Fi motion
 
@@ -508,11 +474,8 @@ At the top it says what does not work and why (Home Assistant not connected, mod
 the reason and what to do.
 
 - **Copy settings**: every setting of this Echo beside the others', differences marked. Tick settings and Echos to copy.
-- **Copy models**: wake words, microWakeWord models, whisper and sound detection models, Echo to Echo. A wake word set
+- **Copy models**: wake words and microWakeWord models, Echo to Echo. A wake word set
   is tried on the receiving Echo's engine first; each Echo that got something restarts its satellite once.
-- **Download from Amazon**: wake words, whisper detection, the newer sound detection model, fetched on the Echo itself.
-  Sign in with a code you enter on your Amazon site, tick what you want. If an Echo's attestation key ever refuses,
-  download on another Echo, or with `scripts/artifacts.sh`, and copy.
 
 **Export / Import**: `hassmic-settings.conf` (name=value lines, without name, keys and pairings). Import applies it to
 this Echo or another, or use it as a preset for the next install (`scripts/setup.sh --preset <file>`).
@@ -569,9 +532,8 @@ ESPHome devices and the Voice PE are:
 On the Echo Dot 3 the setup can delete Amazon's cloud services instead of leaving them stopped (step "Remove Amazon's services",
 or `scripts/debloat.sh`; [docs/cloud-free.md](cloud-free.md) says what goes, what stays and why). Afterwards:
 
-- Alexa cannot come back (`alexa-on.sh`, `MODE=stock-online`), and "Download from Amazon" on the settings page does not work: new wake words,
-  the sound-detection and whisper models come from Amazon's servers and need the services that are gone. The wake words already on the
-  Echo stay.
+- Alexa cannot come back (`alexa-on.sh`, `MODE=stock-online`). The wake words on the Echo stay; new ones from Amazon cannot be fetched any more
+  (this fork removed the page's "Download from Amazon" and the whisper detection that depended on it).
 - Amazon's stock factory reset is gone; the ones above (action button 10 s, Home Assistant, settings page) are hassmic's.
 - A small stand-in library replaces one of Amazon's (`libperf_cpu_info_parser.so`): the audio engine calls it when a microphone stream
   opens, and without a stand-in it waits 20 s for a service that no longer exists and the wake word stops.
@@ -644,7 +606,6 @@ for 30 minutes:
 | Settings and sensors as entities | ✅ | ❌ |
 | Bluetooth from phones | ✅ pairing from Home Assistant | phones paired already |
 | Playing on a Bluetooth speaker | ✅ | keeps one already set up |
-| Bluetooth proxy, sound, whisper, Wi-Fi motion | ✅ | ❌ |
+| Bluetooth proxy, sound, Wi-Fi motion | ✅ | ❌ |
 | Encrypted link | ✅ key set by Home Assistant | ❌ plain TCP |
-| Online updates | ✅ | ❌ pushed from your PC only |
 | Settings page, setup from a phone, factory reset | ✅ | ✅ |

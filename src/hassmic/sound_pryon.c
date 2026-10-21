@@ -1,6 +1,6 @@
 /* The stock acoustic event detector (docs/re-aed.md) on Amazon's libpryon.so, beside the wake word decoder.
- * The model is the firmware's (/system/local/models/AED, the same file on donut, biscuit and radar), or the newer one
- * Amazon serves, where scripts/artifacts.sh installed it (/data/local/hassmic/aed): retrained weights and smoke/CO
+ * The model is the firmware's (/system/local/models/AED, the same file on donut, biscuit and radar), or a newer one
+ * Amazon served, where it was put by hand (/data/local/hassmic/aed): retrained weights and smoke/CO
  * thresholds 0.845 instead of 0.825, the same types; it scored the same on every test clip.  An installed one that
  * does not load leaves the firmware's.  Nothing is detected until the client properties PuffinApp pushes
  * are set: "AcousticEventDetectionEnabled" and "aed_<type>_enabled" per type.  The decoder scores ~10 s windows

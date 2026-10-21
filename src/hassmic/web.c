@@ -24,9 +24,6 @@
  *   copies models from one to the other; root installs them.
  *   microWakeWord's models (mww_store.c): listed, added (uploaded whole, checked by loading them), renamed, tuned,
  *   deleted and picked over signed requests; they are hassmic's own, nothing waits for root.
- *   Amazon itself (davs.c): POST /api/davs/login starts a code pair login (the code on the page, GET /api/davs tells
- *   where it stands), /api/davs/fetch downloads an artifact; installing is the artifacts install.  The tokens of the
- *   registration never reach the page — plain HTTP.
  *   Wi-Fi (wifi.c): GET /api/wifi, POST /api/wifi/scan and /api/wifi/join, signed; root scans and switches.  The one
  *   secret that comes from the page, the network's password, travels sealed (unseal below), and only the PSK made from
  *   it goes on to root.
@@ -46,7 +43,6 @@
 #include "dropin.h"
 #include "artifacts.h"
 #include "board.h"
-#include "davs.h"
 #include "diag.h"
 #include "sound.h"
 #include "hash.h"
@@ -54,7 +50,6 @@
 #include "ringdesign.h"
 #include "netio.h"
 #include "settings.h"
-#include "update.h"
 #include "wifi.h"
 #include "ws.h"
 #include "statefile.h"
@@ -425,19 +420,14 @@ static void state_json(int fd, const struct req *r, const uint8_t me[32])
         for (int c = 0; c < nc && n < cap - 200; c++) { jesc(v, sizeof v, names[c]); n += (size_t)snprintf(o + n, cap - n, "%s\"%s\"", c ? "," : "", v); }
         n += (size_t)snprintf(o + n, cap - n, "]}");
     }
-    /* what does not work, and why.  Models point at the page's Download from Amazon: these said scripts/artifacts.sh
-     * after the page could do it, and people who had taken the USB wires off asked how (forum, 2026-10-17) */
+    /* what does not work, and why */
     n += (size_t)snprintf(o + n, cap - n, "],\"warnings\":[");
     int w = 0;
     if (!core_ha_linked()) n += (size_t)snprintf(o + n, cap - n, "%s\"Home Assistant is not connected\"", w++ ? "," : "");
-    if (core_local_wake && core_whispered() == -2)
-        n += (size_t)snprintf(o + n, cap - n, "%s\"Whisper detection: no model on this Echo yet. Get it with Download from Amazon (Wake word section), or copy it from another Echo\"", w++ ? "," : "");
     if (core_local_wake && sound_model() == SOUND_NONE)
-        n += (size_t)snprintf(o + n, cap - n, "%s\"Sound detection: no model on this Echo (neither the firmware's nor one from Download from Amazon)\"", w++ ? "," : "");
+        n += (size_t)snprintf(o + n, cap - n, "%s\"Sound detection: no model on this Echo\"", w++ ? "," : "");
     if (core_sound_failed())
         n += (size_t)snprintf(o + n, cap - n, "%s\"Sound detection could not start: its model did not load, so it was switched off (boot.log says why)\"", w++ ? "," : "");
-    { const struct core_wake_word *l; if (core_local_wake && core_wake_engine(-1) == WAKE_AMAZON && core_wake_words(&l) <= 1)
-        n += (size_t)snprintf(o + n, cap - n, "%s\"Wake words: only Alexa. Amazon's others (Echo, Computer, ...) come with Download from Amazon (Wake word section), or copy them from another Echo\"", w++ ? "," : ""); }
     pthread_mutex_unlock(&core_lock);
     float t = diag_soc_temp(), cpu = diag_cpu();
     pthread_mutex_lock(&lk); int adb_wait = login.state == 1 && login.kind == W_ADB; pthread_mutex_unlock(&lk);
@@ -629,43 +619,6 @@ static void ring_api(int fd, struct req *r)
     respond_sjson(fd, r, 400, o);
 }
 
-/* /api/davs                       GET   where the Amazon login stands, and the code while one waits (davs.c)
- * /api/davs/login                 POST  an Amazon site ("de", "co.uk", ...): start a login (the code shows in the status)
- * /api/davs/cancel                POST  stop a login that waits for its code
- * /api/davs/logout                POST  deregister from the account, forget the tokens
- * /api/davs/fetch                 POST  "echo de-DE" / "aed de-DE" / "whisper": download, check, stage; install as for
- *                                      a copy (POST /api/artifact/install).  All signed; tokens never in an answer. */
-static void davs_api(int fd, struct req *r)
-{
-    char o[1024], ej[256], err[200] = "";             /* o: the status with its error, name and artifact at full length */
-    int write = !strcmp(r->method, "POST"), rc = 0;
-    if (!signed_ok(r, write)) { respond_json(fd, 401, "{\"error\":\"not logged in\"}"); return; }
-    if (!write && !strcmp(r->path, "/api/davs"))
-    {
-        size_t n = davs_status_json(o, sizeof o);
-        respond_s(fd, r, 200, "application/json", NULL, o, n);
-        return;
-    }
-    if (write && !strcmp(r->path, "/api/davs/login"))
-    {
-        char dom[8] = "";
-        sscanf(r->body, "%7s", dom);
-        rc = davs_login(dom, err, sizeof err);
-    }
-    else if (write && !strcmp(r->path, "/api/davs/logout")) rc = davs_logout(err, sizeof err);
-    else if (write && !strcmp(r->path, "/api/davs/cancel")) rc = davs_cancel(err, sizeof err);
-    else if (write && !strcmp(r->path, "/api/davs/fetch"))
-    {
-        char key[32] = "", loc[8] = "";
-        if (sscanf(r->body, "%31s %7s", key, loc) == 2) rc = davs_fetch(key, loc, err, sizeof err);
-        else { snprintf(err, sizeof err, "what shall this Echo download?"); rc = -1; }
-    }
-    else snprintf(err, sizeof err, "not found");
-    if (!rc) { respond_sjson(fd, r, 200, "{\"ok\":true}"); return; }
-    jesc(ej, sizeof ej, err); snprintf(o, sizeof o, "{\"error\":\"%s\"}", ej);
-    respond_sjson(fd, r, 400, o);
-}
-
 /* /api/vouch/nonce   "<browser key>"                                    -> {"nonce"}       unsigned
  * /api/vouch/issue   "<target's web key> <browser key> <nonce>"         -> {"voucher","via"}  signed: by a browser approved here
  * /api/vouch/login   "<browser key> <nonce> <voucher> <via, hex> <label>" -> {"login"}       unsigned: the voucher is what counts */
@@ -809,23 +762,6 @@ static void log_api(int fd, struct req *r)
     free(t);
 }
 
-/* Online updates come from GitHub: a line of BODY that switches them on (from off) counts only once this Echo reached
- * it (update_probe), else it is turned into a comment and WHY says what failed.  Imports go the same way.  Before
- * core_lock: the probe takes up to 15 s. */
-static void updates_gate(char *body, char *why, size_t cap)
-{
-    why[0] = 0;
-    for (char *p = body; *p; ) {
-        size_t l = strcspn(p, "\n"); char *k = p + strspn(p, " \t"), v[16];
-        if (!strncmp(k, "online_updates=", 15)) {
-            snprintf(v, sizeof v, "%.*s", (int)strcspn(k + 15, "\r\n"), k + 15);
-            int on = !strcmp(v, update_channels[UPDATE_BETA]) || !strcmp(v, update_channels[UPDATE_RELEASE]);
-            if (on && update_channel(-1) == UPDATE_OFF && (why[0] || update_probe(why, cap))) *k = '#';
-        }
-        p += l + (p[l] == '\n');
-    }
-}
-
 static void handle(int fd)
 {
     struct req r; int e; uint8_t pub[32];
@@ -866,14 +802,11 @@ static void handle(int fd)
     }
     else if (!strcmp(r.method, "POST") && !strcmp(r.path, "/api/set")) {
         /* body: "name=value" lines, one setting or a whole export */
-        char err[2048], o[2800], ej[2200], why[300], wj[340]; int applied;
+        char err[2048], o[2400], ej[2200]; int applied;
         if (!signed_ok(&r, 1)) { respond_json(fd, 401, "{\"error\":\"not logged in\"}"); free(r.body); return; }
-        updates_gate(r.body, why, sizeof why);
         pthread_mutex_lock(&core_lock); applied = settings_apply_text(r.body, err, sizeof err); pthread_mutex_unlock(&core_lock);
-        if (why[0]) { size_t n = strlen(err); snprintf(err + n, sizeof err - n, "online_updates: GitHub cannot be reached from this Echo (%s), so they stay off\n", why); }
-        jesc(ej, sizeof ej, err); jesc(wj, sizeof wj, why);
-        /* github_unreachable: the page's warning under "Online updates" */
-        snprintf(o, sizeof o, "{\"applied\":%d,\"errors\":\"%s\",\"github_unreachable\":\"%s\"}", applied, ej, wj);
+        jesc(ej, sizeof ej, err);
+        snprintf(o, sizeof o, "{\"applied\":%d,\"errors\":\"%s\"}", applied, ej);
         fprintf(stderr, "web: %d setting%s changed%s%s", applied, applied == 1 ? "" : "s", err[0] ? ", refused: " : "\n", err);
         respond_sjson(fd, &r, 200, o);
     }
@@ -923,7 +856,6 @@ static void handle(int fd)
         respond_sjson(fd, &r, 200, found ? "{\"revoked\":true}" : "{\"revoked\":false}");
     }
     else if (!strncmp(r.path, "/api/artifact", 13)) artifact_api(fd, &r);
-    else if (!strncmp(r.path, "/api/davs", 9)) davs_api(fd, &r);
     else if (!strncmp(r.path, "/api/mww", 8)) mww_api(fd, &r);
     else if (!strncmp(r.path, "/api/ring", 9)) ring_api(fd, &r);
     else if (!strncmp(r.path, "/api/wifi", 9)) wifi_api(fd, &r);

@@ -2162,6 +2162,11 @@ Run in this order. Each step says what it proves.
 
 ## Phase 6 — Amazon's services removed, not only stopped **(device)**
 
+Update 2026-10-22: hassmic's own parts that needed what is gone were removed (docs/cloud-free.md "What was removed from hassmic itself"): the Amazon download (`davs.c`,
+`dha.c`, scripts, page), whisper detection, online updates from GitHub (`update.c`, the update entity, `ota_handoff`, trust in the release key on the Echo), the drmrpc/keystore groups.
+Kept after a decision: sound detection (firmware model, off by default), timers, Wyoming (tiny), Bluetooth AAC.  To do, with AirPlay 2 below: light blue flashes on the ring until
+Home Assistant is connected (see that section).
+
 Update 2026-10-21 (evening): the fourth pass (904 files at once) removed `libacehal_network_all.so`, the target of twelve Wi-Fi HAL symbolic links, and the Echo lost its
 Wi-Fi; recovered through USB wires and TWRP (`scripts/debloat-twrp.sh`).  Redone in tested groups (docs/cloud-free.md "The fourth pass"); passes 5-8 followed.  Open: the dead-man switch
 (restore the quarantine and reboot when there is no IP after N minutes; not needed while the USB wires are on), other models' lists.  Purged 2026-10-21 (21:5x): /system 139 052 -> 87 652 kB, verify ok after a cold boot.

@@ -41,7 +41,7 @@ async def main():
     with open(os.path.join(state, "preset"), "w") as f: f.write("# from another Echo's page\ndo_not_disturb=on\nno_such_thing=1\n")   # scripts/setup.sh --preset
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(state, "play.raw"),
                HASSMIC_MDNS_FILE=os.path.join(state, "none"), HASSMIC_ARB_ADDR="127.255.255.255", HASSMIC_MODELS=os.path.join(state, "models"),
-               HASSMIC_FAKE_WHISPER="1", HASSMIC_ADB_OPEN=os.path.join(state, "adb-open.root"),
+               HASSMIC_ADB_OPEN=os.path.join(state, "adb-open.root"),
                HASSMIC_FAKE_SOUND_MODEL=os.path.join(state, "aed-model"),           # which sound model there is (sound_none.c)
                HASSMIC_LOG=os.path.join(state, "log"),                              # boot.log, for the page's viewer
                HASSMIC_CLOCK_SYNCED="0",                                            # stamps: seconds since boot (clock.c)
@@ -89,18 +89,18 @@ async def main():
               f"signed: the state, settings as stored ({len(names)} settings)")
         check(any(c["me"] for c in s.get("clients", [])), "this browser among the approved ones")
         check("cpu" in s.get("diag", {}) and "soc_temp" in s.get("diag", {}), f"diagnostics on the page: {s.get('diag')}")
-        check({n for n, x in names.items() if x["feature"]} >= {"arbitration", "sound_detection", "whisper_detection"},
-              "features: arbitration, sound detection, whisper detection (Bluetooth, Wi-Fi motion: not on this PC)")
+        check({n for n, x in names.items() if x["feature"]} >= {"arbitration", "sound_detection"},
+              "features: arbitration, sound detection (Bluetooth, Wi-Fi motion: not on this PC)")
 
         # Home Assistant: the lean list, and what the page changes
         ha, by, states = await ha_connect()
-        page_only = {"mic_level", "noise_reduction", "sound_detection", "debug_access_adb", "join_arbitration_network", "online_updates",
+        page_only = {"mic_level", "noise_reduction", "sound_detection", "debug_access_adb", "join_arbitration_network",
                      "bluetooth_announcements", "bluetooth_announcement_language", "soc_temperature", "cpu_usage", "wifi_motion_detection",
                      "speaker_gain"}
         check(not page_only & set(by) and {"wake_sound", "mute", "do_not_disturb", "firmware", "equalizer_bass", "led_brightness"} <= set(by),
               f"Home Assistant lists the lean set only: {sorted(set(by))}")
-        check("sound" in by and "last_request_whispered" in by and "arbitration_peers" in by and "arbitration_key" in by,
-              "features that are on: their entities (sound, whisper, arbitration)")
+        check("sound" in by and "arbitration_peers" in by and "arbitration_key" in by,
+              "features that are on: their entities (sound, arbitration)")
         r = b.set(mic_level=-30, wake_sound="off"); await until(lambda: states.get(by["wake_sound"].key) is False)
         check(r.get("applied") == 2 and cfg().get("mic_level") == "-30" and cfg().get("wake_sound") == "off", f"set two, saved: {r}")
         check(states.get(by["wake_sound"].key) is False, f"Home Assistant shows it at once: {states.get(by['wake_sound'].key)}")
@@ -114,12 +114,12 @@ async def main():
         try: await ha.disconnect()
         except Exception: pass
         ha, by, states = await ha_connect()
-        check("sound" not in by and "last_request_whispered" in by, "reconnected: sound detection off, no \"Sound\" entity; the others stay")
-        b.set(whisper_detection="off", sound_detection="on"); await asyncio.sleep(0.8)
+        check("sound" not in by and "arbitration_peers" in by, "reconnected: sound detection off, no \"Sound\" entity; the others stay")
+        b.set(sound_detection="on"); await asyncio.sleep(0.8)
         try: await ha.disconnect()
         except Exception: pass
         ha, by, states = await ha_connect()
-        check("sound" in by and "last_request_whispered" not in by, "whisper off and sound on: the list follows")
+        check("sound" in by, "sound on: the list follows")
         log_n = len(open(log).read())
         b.set(sound_detection="on"); await asyncio.sleep(0.5)
         check("links closed" not in open(log).read()[log_n:], "the same value again: Home Assistant left alone")

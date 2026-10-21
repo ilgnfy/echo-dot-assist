@@ -1,14 +1,14 @@
 # Sourced by the PC scripts after scripts/lib/device.sh (DEVICE, OUT): where the Echo's binaries in build/<codename>/
 # come from.  Built here (make: the Android NDK and the unpacked firmware), or the release CI published of this very
 # commit: hassmic-<codename>.bundle, checked against keys/release.pub and unpacked by scripts/otatool.py, so nothing
-# has to be installed or compiled for it.  It is what online updates install, the same files byte for byte.
+# has to be installed or compiled for it (the same files byte for byte).
 #   PREBUILT=1    the release's; stop if this commit has none
 #   PREBUILT=0    always build
 #   (unset)       build where the NDK is there, else the release's
 # $OUT/PREBUILT marks a release's files there: "<tag> <commit> <version>", then their names.  A build here removes them
 # first, or make would take the downloaded binaries (newer than the sources) as up to date.
 
-REPO=Gamer92000/echo-dot-assist         # as src/hassmic/update.c
+REPO=ilgnfy/echo-dot-assist             # where CI publishes this fork's releases
 
 _head() { git rev-parse HEAD 2>/dev/null; }
 # no changes to tracked files: only then is the release's build this tree's

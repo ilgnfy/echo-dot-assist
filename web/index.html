@@ -365,7 +365,6 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .progress { height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; flex-basis: 100%; }
 .progress div { height: 100%; background: var(--accent); transition: width .2s; }
 .busy { flex-basis: 100%; font-size: 13.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-/* download from Amazon: sign in, the code, the picker */
 .stepper { display: flex; margin: 8px 0 22px; padding: 0 0 18px; list-style: none; counter-reset: s; font-size: 13px;
             border-bottom: 1px solid var(--line); }
 .stepper li { counter-increment: s; display: flex; align-items: center; gap: 8px; color: var(--faint); flex: 1; min-width: 0; white-space: nowrap; }
@@ -384,27 +383,9 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .field select { min-width: 220px; }
 .field .help { margin: 0; }
 .field input[type=text] { width: min(100%, 320px); }
-.davs-code { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
-.davs-code .code { font: 650 32px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .22em; padding: 16px 14px 16px 22px;
-                   border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-2); user-select: all; }
-.davs-code.pending .code { color: var(--faint); }
-.davs-code-r { flex: 1; min-width: 220px; }
-.davs-code-r p { margin: 0 0 12px; }
-.davs-wait { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; margin-top: 18px; font-variant-numeric: tabular-nums; }
-.davs-wait .grow { flex: 1; }
 .progress.thin { height: 3px; margin-top: 8px; }
 .progress.thin div { transition: width 1s linear; }
-.davs-acct { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-2);
-             border: 1px solid var(--line); margin-bottom: 12px; }
-.davs-acct .ic { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--ok-soft); color: var(--ok); flex: none; }
-.davs-acct .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.davs-acct .help { margin: 0; font-size: 12.5px; }
-.davs-row { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
-.davs-row input { margin-top: 0; }
-.davs-st { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.davs-none { color: var(--faint); font-size: 12.5px; }
 .ch-sub.bad { color: var(--bad); }
-@media (max-width: 640px) { .davs-row { grid-template-columns: auto minmax(0, 1fr) auto; } .davs-row .davs-st { grid-column: auto; } }
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: rot .8s linear infinite; flex: none; }
 @keyframes rot { to { transform: rotate(360deg); } }
 input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; cursor: pointer; }

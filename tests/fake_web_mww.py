@@ -56,7 +56,7 @@ async def ha_config():
 def start(state, log, extra=()):
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(state, "play.raw"),
                HASSMIC_MDNS_FILE=os.path.join(state, "none"), HASSMIC_ARB_ADDR="127.255.255.255", HASSMIC_MODELS=os.path.join(state, "models"),
-               HASSMIC_FAKE_WHISPER="1", HASSMIC_LOG=log, HASSMIC_CLOCK_SYNCED="0")
+               HASSMIC_LOG=log, HASSMIC_CLOCK_SYNCED="0")
     return subprocess.Popen([f"{ROOT}/build/hassmic-host", "-P", "esphome", "-p", str(PORT), "-n", "Echo MWW", "-L", "-z", "0", "-o", "0",
                              "-a", "0", "-W", str(WEB), *extra], env=env, stderr=open(log, "a"))
 

@@ -12,7 +12,7 @@ through the reverse-engineered C API of `libmixerAPI.so` and speaks the ESPHome 
 Docs: `README.md` (short user-facing overview with figures; every feature in detail in `docs/GUIDE.md`, security model in
 `docs/SECURITY.md`; figures are CeTZ sources in `docs/img/src/`, rendered light+dark by `tools/figures.sh`; install instructions per model in `devices/<codename>/README.md`, guided by
 `scripts/setup.sh`), `DEVELOPMENT.md` (architecture, layout, tests, contributing), `PLAN.md` (phases, open issues, every measurement), `CHANGELOG.md`
-(user-visible changes by date), `docs/` (reverse-engineering findings: `FINDINGS.md`, `re-platform.md`, `re-pryon.md`, `re-aed.md`, `re-whisper.md`, `re-a2dp-source.md`, `re-davs-login.md`,
+(user-visible changes by date), `docs/` (reverse-engineering findings: `FINDINGS.md`, `re-platform.md`, `re-pryon.md`, `re-aed.md`, `re-a2dp-source.md`, and the notes of what was removed (`re-whisper.md`, `re-davs-login.md`),
 `sendspin-digest.md`, `cloud-free.md`: Amazon's services removed instead of stopped, results, recovery, porting).
 
 ## Build and test
@@ -64,9 +64,6 @@ aioesphomeapi, wyoming, aiosendspin, noiseprotocol, aiohttp):
 .venv/bin/python tests/fake_web_wifi.py       # Wi-Fi switch: sealed password, PSK, root's wifi.sh against a fake wpa_cli
 .venv/bin/python tests/fake_web_mww.py        # microWakeWord: models added/edited/deleted from the page, engine switch,
                                              # real detections on testdata/alexa_espeak.raw, copy as an artifact
-.venv/bin/python tests/fake_web_davs.py       # models downloaded from a fake Amazon: login by code pair with the device
-                                             # attestation token, DAVS, unpack, staging, install, deregister
-.venv/bin/python tests/fake_ha_update.py      # online updates: page channel + HA update entity, fake GitHub, root's installer
 .venv/bin/python tests/fake_ha_wakesound.py   # wake sound removal: the PC's stand-in echo (HASSMIC_FAKE_ECHO) off/on
 .venv/bin/python tests/fake_ha_volumes.py     # separate volumes: four of their own or following the music, the mixer at the
                                              # loudest, HA's media at the music's, keys on what plays, gains in dB, a
@@ -124,11 +121,6 @@ One unit test: `make unit-<name>` (`UNIT_TESTS` in the Makefile).
   capture while hassmic runs: the mixer feeds the mic stream to one client only.
 - `scripts/mic-compare.sh [-l] [secs]` records micRaw beside that dump and prints speech against noise for both
   (`tools/mic-compare.py`): what the front end does to a sentence. `-l` sets listening mode for the recording.
-- `scripts/artifacts.sh [echo-ip]` (logic in `scripts/lib/artifacts.sh`; no longer a step of `setup.sh`, and it opens with a
-  warning that the page's "Download from Amazon" is the way meant now; a fallback): Amazon's DAVS
-  artifacts, picked in a menu with a checklist per kind (new ones ticked): wake words, installed from `device-logs/models/`
-  after loading each with the Echo's `pryon_test`, and other artifacts (the sound detection model), kept on the PC for tests.
-  Downloads come from Amazon in one go (stock-online + Alexa app registration, undone afterwards).
 - `scripts/probe.sh` checks the device's libraries match the analysed firmware. Everything assumes exactly that version.
 - PC scripts that use adb (`deploy`, `probe`, `install-system`, `capture-test`, `mic-compare`) detect the model from `ro.product.device`
   via `scripts/lib/device.sh`; `ota-push.sh` takes `DEVICE` (default donut). With two Echos on adb set `ANDROID_SERIAL`.
@@ -173,17 +165,12 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   `wyoming.c`. Selected with `-P`. The core calls `start/audio/stop/played/...` on the active proto with lock held.
 - **Audio backend (`audio.h`)**: `audio_mixer.c` on device (mixer C API: capture, voice/TTS, music, Bluetooth and
   earcon streams mixed by the mixer); `audio_file.c` for PC builds. Swapped at link time in the Makefile.
-- **Sound detection (`sound.h`)**: `sound_pryon.c` (Alexa Guard's model on `libpryon.so`: the firmware's, or Amazon's newest
-  from `/data/local/hassmic/aed` (`scripts/artifacts.sh`); a second decoder, off unless HA's
+- **Sound detection (`sound.h`)**: `sound_pryon.c` (Alexa Guard's model on `libpryon.so`: the firmware's (a newer
+  one in `/data/local/hassmic/aed`, by hand, is taken over it); a second decoder, off unless HA's
   switch is on; ESPHome event entity "Sound"; windows with own playback dropped; `docs/re-aed.md`) or `sound_none.c`
   (host build, `HASSMIC_FAKE_SOUND`; `HASSMIC_FAKE_SOUND_MODEL` names the model, `broken` fails to load). `sound_model()`
   says which model it takes, for the page; a start that fails switches the setting off via `settings_set` and sets
   `core_sound_failed()` (page warning). Picked in the Makefile from the wake word backend.
-- **Whisper detection (`whisper.h`)**: `whisper_pryon.c` (libpryon `WhisperApi_*`, one detector per request fed from the
-  start of streaming, end of utterance on HA's VAD end (`core_mic_off`), result into the ESPHome binary sensor "Last
-  request whispered" before STT ends, for the agent's prompt template; `docs/re-whisper.md`) or `whisper_none.c` (host
-  build, `HASSMIC_FAKE_WHISPER`). Model from DAVS only, installed by `scripts/artifacts.sh` into
-  `/data/local/hassmic/whisper` (not `models/`: it carries a stray `pryon.manifest`); without it, no sensor.
 - **Wake word (`wake.h`)**: `wake_pryon.c` (stock `libpryon.so`, headers in `src/include/pryon_api.h`) or `wake_none.c`
   (host build) as the vendor engine, link-time swap; microWakeWord (below) on every build, picked at run time.
   Two slots (`WAKE_SLOTS`): HA's "Wake word" and "Wake word 2" listen at once, a Pryon decoder (or mww model) each;
@@ -265,7 +252,7 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   exportable or not), used by `proto_esphome.c`, the settings page and exports. Its own ones persist in `state/config`
   (`name=value`; the positional `state/settings` of older versions is read once and moved); arbitration, Sendspin and
   the equalizer stay where their module keeps them. Loaded in `main()` whatever the protocol. Changes from elsewhere
-  reach HA through `proto->settings_changed`. Features (`feature` in the table: arbitration, sound, whisper, Wi-Fi
+  reach HA through `proto->settings_changed`. Features (`feature` in the table: arbitration, sound, Wi-Fi
   motion, light sensor (Illuminance + auto level), wake word events (`wake_events`: the "Wake word" event entity,
   `core_wake_events`), Bluetooth audio, Bluetooth speaker, Drop In, separate volumes): their entities are listed only while on (`proto_esphome.c` `listed()`,
   which also gates states); switching one closes the HA links (`proto->entities_changed`), HA re-lists on reconnect and
@@ -300,33 +287,21 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   applies it once at start (`settings_preset`, as an import) and renames it `preset.applied`. `web/crypto.js` (X25519, BLAKE2b; no `crypto.subtle` on plain HTTP) is checked
   against Python by `tests/unit/web_crypto_test.py` (in `make unit`, needs node). The Echos section copies chosen
   settings to chosen Echos (a matrix of exports), and models.
-- **Amazon downloads** (`davs.c` + `dha.c`): the settings page's "Download from Amazon".  `dha.c` builds the device
-  attestation token `/auth/register` needs, in the two shapes Amazon's MAPs make: a drvV1 JWT (biscuit, radar; RSA
-  keymaster through `libacehal_dha.so`, dlopen'd, needs group drmrpc) or donut's drvV3 token around the dhav2
-  certificate (field 0x203 of the same HAL; EC key in the TEE — `/dev/trustzone` is system:drmrpc and the cert file
-  keystore:keystore, hence drmrpc,keystore in donut's DAEMON_GROUPS), whichever the HAL's key parses as.  `davs.c` does the code pair login (the code on the
-  page, register polled with the token, tokens in `state/davs` 0600, never sent to the page), asks DAVS with the
-  engine's own compatibility ids (`wake_attributes`), downloads and unpacks the artifact tar.gz (libz), and stages it
-  through artifacts.c.  Works against the real Amazon (biscuit 2026-10-06, donut with its drvV3 token 2026-10-09,
-  both amazon.de; what it answers in docs/re-davs-login.md, which also has the drvV3 analysis).  The page offers
-  every Amazon site with Alexa (davs.c's list), any of the account's region works.
-- **Artifacts** (`artifacts.c`): Amazon's models (`wake:<name>` = `models/<name>/`, `sound` = `aed/`, `whisper`): files
-  plus two levels of folders (`whisper_components/`, `BDPGeneratedFiles/`, `nttfusionconfig/ntt_conv/`; a file's name is then its path), listed
+- **Artifacts** (`artifacts.c`): models (`wake:<name>` = `models/<name>/`, `mww:<id>`): files
+  plus two levels of folders (`BDPGeneratedFiles/`, `nttfusionconfig/ntt_conv/`; a file's name is then its path), listed
   with a digest (BLAKE2b-256 over name, size, content per file), read and written in pieces (`ART_CHUNK_MAX`) over
   signed requests, so the page copies them Echo to Echo. Staged in `state/artifacts/<stage>/`; commit checks sizes,
   digest and, for wake word sets, `pryon_test` (next to the binary, `HASSMIC_PRYON_TEST`); install writes
   `state/artifacts/request`. The model folders are root's: `main.sh`'s watcher runs `scripts/device/artifact-install.sh`,
   which reads the staged files as the daemon's user (runas: no link can point root at its files), swaps a fresh
-  root-owned folder in and restarts hassmic (the wake word list and the whisper model are read at start).
+  root-owned folder in and restarts hassmic (the wake word list is read at start).
   `artifact-install.sh migrate` (main.sh, every satellite start): wake word folders under the short name (`echo-de`,
-  from installs by hand) renamed to artifacts.sh's (`echo-de-DE`) where the language has one region; `state/wake_word`
+  from installs by hand) renamed to the long name Amazon's sets carry (`echo-de-DE`) where the language has one region; `state/wake_word`
   follows.
 - **Clock and log stamps** (`clock.c`): `proto_esphome.c` asks HA for the time (GetTimeRequest) on keyed links (on
   subscribe, then every 6 h on pings); `clock_from_ha` leaves `<epoch> <boottime s.cs>` in `state/clock`, root's
   `main.sh` `clock_set` (netwatch) sets clock + RTC and `hassmic.clock.synced`. `clock_log_start()` (first in `main()`
-  after options) turns stderr/stdout into a pipe to a double-forked reader that stamps lines and drops known Amazon
-  noise; it ignores hassmic's signals and ends at EOF. Never make it hassmic's direct child (Amazon's DHA module waits
-  for all children). Host: `HASSMIC_CLOCK_SYNCED=0` plays an unset clock.
+  after options) turns stderr/stdout into a pipe to a double-forked reader that stamps lines; it ignores hassmic's signals and ends at EOF. Host: `HASSMIC_CLOCK_SYNCED=0` plays an unset clock.
   Time zone: GetTimeResponse field 2 (a POSIX TZ string, aioesphomeapi's `timezone.py`; HA keeps the name) ->
   `clock_zone_from_ha` -> `tz.c` `tz_lookup`: a zone of bionic's one-file `tzdata` whose TZif footer is that rule (the
   zone set kept when it has it, else zone.tab's names in area order), else the string itself -> `state/timezone` ->
@@ -395,13 +370,7 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   from the release CI published of HEAD (tag `v<commit time>[-beta]` pointing at HEAD, clean tree; bundle verified
   against `keys/release.pub`, marked `build/<codename>/PREBUILT`) where there is no NDK, or with `PREBUILT=1`;
   `PREBUILT=0` always builds. `scripts/probe.sh` compares with `devices/<codename>/probe.md5`, not the unpacked firmware.
-- **Online updates** (`update.c`): "Online updates" on the settings page (off default / beta / release, `state/config`) and an
-  ESPHome update entity; checks GitHub's releases API, downloads `hassmic-<board.codename>.bundle` through the firmware's
-  libcurl (dlopen; sockets via `net_socket` so the egress lock lets them out), hands it to root through `ota_handoff`.
-  Root (`main.sh` ota_watch) accepts the owner's `update.pub` or the release key (`release.pub` of the running copy, else
-  the system partition). Channel change and install only over the keyed connection.  The page switches a channel on
-  only once `update_probe` reached GitHub (web.c `updates_gate`, before `core_lock`; else `github_unreachable` in the
-  answer and a warning under the row).
+- **Updates**: only pushed from the PC (`ota.c`, above) or over USB/adb: nothing is fetched from the internet by the Echo (online updates from GitHub, the "Download from Amazon" page and the whisper and Amazon model downloads were removed 2026-10-22).  Root (`main.sh` ota_watch) accepts the owner's `update.pub` only.
 - **Media over HTTPS** (`https.c`, issue #30): `proto_esphome.c` `http_get` hands `https://` to `https_open`, which
   runs the firmware's libcurl (dlopen, BoringSSL, system CAs) in a thread writing the body into a socketpair: the
   decoders and the cancel's `shutdown()` work as on a plain fetch.  Setting `https_verify` (default on; off takes any
@@ -433,7 +402,7 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   `HASSMIC_FAKE_BEAM`.
 - `src/include/`: headers for the reversed Amazon libraries (`mixer_api.h`, `pryon_api.h`, `aipc_api.h`) and `netio.h`.
 - `src/tools/`: standalone device tools (`mixcap`, `mixplay`, `pryon_test`, `aed_test`, `latency`, `runas` — AIPC refuses uid 0 and
-  the image has no `su`; `curlspy`, `hciscan`, `a2dpprobe`, `dha_test` not in `all`).
+  the image has no `su`; `hciscan`, `a2dpprobe` not in `all`).
 
 Boot integration (`scripts/system/`, rc in `devices/<codename>/`): `hassmic.rc` (init) starts `boot.sh` (fixed, on /system), which picks the factory
 copy or a verified update and runs `main.sh` (updatable): `main.sh firewall` (egress lock re-asserted in a loop, root side
@@ -453,7 +422,7 @@ and link-local ranges of `LOCAL4` only. A stock rule hassmic comes to depend on 
 prints it.
 
 `tools/` is PC-side reverse-engineering and firmware tooling (`payload_dump.py`, Thumb disassembly helpers,
-`davs-fetch.py` for extra wake word models).
+.
 
 ## Conventions
 

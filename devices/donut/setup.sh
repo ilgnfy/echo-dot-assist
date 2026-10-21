@@ -30,7 +30,6 @@ ROOTED_SKIP="udev usb unlock flash root"     # done on an Echo that is rooted al
 NOTES=(
     "The USB wires can come off. adb over Wi-Fi is closed: scripts/adb-wifi.sh <echo-ip> (or debug access on the settings page, http://<echo-ip>:28931/) opens it for 30 min."
     "Updates: git pull, then scripts/ota-push.sh <echo-ip>."
-    "More wake words, whisper or sound detection models: the settings page, http://<echo-ip>:28931/ → \"Download from Amazon\" (not once Amazon's services are removed: docs/cloud-free.md)."
     "Music Assistant, Bluetooth speaker: $DDIR/README.md"
 )
 

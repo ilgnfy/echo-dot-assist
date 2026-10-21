@@ -36,10 +36,6 @@
  *   debug access     a switch opens adb over Wi-Fi for 30 min (adbwifi.c); only taken over the connection with the key
  *   wifi motion      experimental, off by default: a switch, a motion binary sensor, its sensitivity (wifimotion.c);
  *                    listed only where the Wi-Fi driver can do it
- *   online updates   a select (off by default, beta, release) and an update entity with the newest build on that channel
- *                    and an install button (update.c); channel and install only over the connection with the key
- *   whisper          a binary sensor: the last request was whispered (whisper.h), set on the VAD end, before the
- *                    conversation agent runs, so its prompt template can read it; listed only with the model installed
  *   drop in          the action "drop_in" (esphome.<node>_drop_in, target: another Echo's name or node) calls an Echo
  *                    of the network (dropin.c); "Drop In" says idle / calling / ringing / connected, "Drop In with"
  *                    whom, the button "End Drop In" hangs up, the event entity "Drop In result" says what came of each
@@ -49,6 +45,11 @@
  *                    the others (main.c), each only while that kind has a volume of its own rather than following the
  *                    music's
  */
+#ifdef RELEASE
+#define RUNNING_VERSION VERSION               /* a build CI published (Makefile RELEASE) */
+#else
+#define RUNNING_VERSION VERSION "+" BUILD
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -81,7 +82,6 @@
 #include "noise.h"
 #include "sendspin.h"
 #include "clock.h"
-#include "update.h"
 #include "wifimotion.h"
 #include "net.h"
 #include "netio.h"
@@ -103,11 +103,10 @@ enum {
     BLE_READ, BLE_WRITE_REQ, BLE_READ_DESC_REQ, BLE_WRITE_DESC_REQ, BLE_NOTIFY_REQ, BLE_NOTIFY_DATA, BLE_CONN_FREE_REQ,
     BLE_CONN_FREE, BLE_GATT_ERROR, BLE_WRITTEN, BLE_NOTIFY, BLE_PAIRED, BLE_UNPAIRED, BLE_UNSUBSCRIBE, BLE_CACHE_CLEARED,
     BLE_RAW_ADV = 93, BLE_SCANNER_STATE = 126, BLE_SCANNER_SET_MODE = 127, LIST_EVENT = 107, EVENT = 108,
-    LIST_UPDATE = 116, UPDATE_STATE, UPDATE_COMMAND, LIST_BUTTON = 61, BUTTON_COMMAND = 62,
+    LIST_BUTTON = 61, BUTTON_COMMAND = 62,
     LIST_LIGHT = 15, LIGHT_STATE = 24, LIGHT_COMMAND = 32,
 };
 enum { COLOR_MODE_RGB = 35 };           /* on/off, brightness and RGB: the light ring's one mode */
-enum { UPDATE_CMD_INSTALL = 1, UPDATE_CMD_CHECK = 2 };
 /* Proxy features: passive scan, active connections, remote caching (Home Assistant keeps the GATT database and writes the
  * notification descriptors itself), pairing, raw advertisements, scanner state and mode.  Not: cache clearing (there is
  * no cache on the Echo), connection parameters.  Scanner state: idle / running; mode: passive / active.
@@ -123,7 +122,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_BT_ANNOUNCE, KEY_DND, KEY_EQ_BASS, KEY_EQ_MID, KEY_EQ_TREBLE, KEY_BT_LANG, KEY_ARB_JOIN, KEY_ARB_PEERS, KEY_ARB_SERVICE,
        KEY_SS_UNPAIRED, KEY_DENOISE, KEY_ADB_WIFI, KEY_LUX, KEY_LED_AUTO, KEY_LED_BRIGHTNESS, KEY_SOUND_DETECTION, KEY_SOUND,
        KEY_BT_OUT_SEARCH, KEY_BT_OUT, KEY_BT_OUT_STATUS, KEY_BT_OUT_DELAY, KEY_WIFI_MOTION_ON, KEY_WIFI_MOTION, KEY_WIFI_MOTION_SENS,
-       KEY_UPDATE_CHANNEL, KEY_UPDATE, KEY_WHISPERED, KEY_ARB_HANDOFF, KEY_WEB_URL, KEY_IDENTIFY, KEY_RESET,
+       KEY_FIRMWARE, KEY_ARB_HANDOFF, KEY_WEB_URL, KEY_IDENTIFY, KEY_RESET,
        KEY_TIMER_RINGING, KEY_TIMER_NAMES, KEY_DROPIN_SERVICE, KEY_DROPIN_STATE, KEY_DROPIN_PEER, KEY_DROPIN_END, KEY_RESTART,
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
        KEY_CALL_VOLUME, KEY_WAKE };
@@ -351,8 +350,6 @@ static void send_setting(int key)       /* lock held */
     case KEY_SOUND_DETECTION: pb_uint(&b, 2, core_sound(-1)); send_state(SWITCH_STATE, &b); break;
     case KEY_WIFI_MOTION_ON: if (wifimotion_present()) { pb_uint(&b, 2, wifimotion_enable(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_WIFI_MOTION_SENS: if (wifimotion_present()) { pb_float(&b, 2, wifimotion_sensitivity(-1)); send_state(NUMBER_STATE, &b); } break;
-    case KEY_WHISPERED:                 /* unknown until a request has been scored */
-        { int w = core_whispered(); if (w != -2) { pb_uint(&b, 2, w == 1); pb_uint(&b, 3, w < 0); send_state(BINARY_SENSOR_STATE, &b); } }
         break;
     case KEY_WIFI_MOTION:               /* unknown while switched off */
         if (wifimotion_present()) { int m = wifimotion_motion(); pb_uint(&b, 2, m > 0); pb_uint(&b, 3, m < 0); send_state(BINARY_SENSOR_STATE, &b); }
@@ -378,13 +375,7 @@ static void send_setting(int key)       /* lock held */
     case KEY_BT_OUT_STATUS:
         if (ble_present()) { PB(t, 160); char st[120]; a2dp_out_status(st, sizeof st); pb_fixed32(&t, 1, key); pb_str(&t, 2, st); send_state(TEXT_SENSOR_STATE, &t); }
         break;
-    case KEY_UPDATE_CHANNEL: pb_str(&b, 2, update_channels[update_channel(-1)]); send_state(SELECT_STATE, &b); break;
-    case KEY_UPDATE: {
-        PB(u, 768); struct update_state us; update_get(&us);
-        pb_fixed32(&u, 1, key); pb_uint(&u, 3, us.in_progress); pb_uint(&u, 4, us.in_progress); pb_float(&u, 5, us.progress);
-        pb_str(&u, 6, us.current); pb_str(&u, 7, us.latest); pb_str(&u, 8, "hassmic"); pb_str(&u, 9, us.summary); pb_str(&u, 10, us.url);
-        send_state(UPDATE_STATE, &u);
-    } break;
+    case KEY_FIRMWARE: pb_str(&b, 2, RUNNING_VERSION); send_state(TEXT_SENSOR_STATE, &b); break;
     }
 }
 
@@ -503,7 +494,7 @@ static int listed(int key)
 {
     switch (key) {
     case KEY_MIC_LEVEL: case KEY_DENOISE: case KEY_BT_ANNOUNCE: case KEY_BT_LANG: case KEY_ADB_WIFI: case KEY_ARB_JOIN: case KEY_SS_UNPAIRED:
-    case KEY_SOUND_DETECTION: case KEY_WIFI_MOTION_ON: case KEY_UPDATE_CHANNEL: case KEY_SOC_TEMP: case KEY_CPU_USAGE: return 0;
+    case KEY_SOUND_DETECTION: case KEY_WIFI_MOTION_ON: case KEY_SOC_TEMP: case KEY_CPU_USAGE: return 0;
     case KEY_SENDSPIN_TOKEN: return core_sendspin_port != 0;
     case KEY_SOUND: return settings_on("sound_detection");
     case KEY_WAKE: return settings_on("wake_events");
@@ -511,7 +502,6 @@ static int listed(int key)
     case KEY_BT_OUT_SEARCH: case KEY_BT_OUT: case KEY_BT_OUT_STATUS: case KEY_BT_OUT_DELAY: return ble_present() && settings_on("bluetooth_speaker");
     case KEY_ARB_PEERS: return arb_running() && settings_on("arbitration");
     case KEY_ARB_SERVICE: return arb_running();     /* the network, which runs either way */
-    case KEY_WHISPERED: return core_whisper_model() && settings_on("whisper_detection");
     case KEY_WIFI_MOTION: case KEY_WIFI_MOTION_SENS: return wifimotion_present() && settings_on("wifi_motion");
     case KEY_LED_AUTO: return have_light;
     case KEY_LUX: return have_light && settings_on("light_sensor");
@@ -582,10 +572,6 @@ static void send_setting_entities(void)
         { PB(b, 128); pb_str(&b, 1, "arbitration_peers"); pb_fixed32(&b, 2, KEY_ARB_PEERS); pb_str(&b, 3, "Arbitration peers");
           pb_str(&b, 5, "mdi:access-point-network"); pb_uint(&b, 13, 2); send_msg(LIST_SENSOR, &b); }
     }
-    /* Whisper detection (whisper.h): "{{ is_state('binary_sensor.<node>_last_request_whispered', 'on') }}" in the
-     * conversation agent's prompt template, to have it answer in whispered speech tags */
-    if (listed(KEY_WHISPERED)) { PB(b, 192); pb_str(&b, 1, "last_request_whispered"); pb_fixed32(&b, 2, KEY_WHISPERED);
-        pb_str(&b, 3, "Last request whispered"); pb_str(&b, 8, "mdi:account-voice"); send_msg(LIST_BINARY_SENSOR, &b); }
     /* Wi-Fi motion (wifimotion.c): experimental, and the names say so */
     if (listed(KEY_WIFI_MOTION)) {
         { PB(b, 192); pb_str(&b, 1, "wifi_motion"); pb_fixed32(&b, 2, KEY_WIFI_MOTION); pb_str(&b, 3, "Wi-Fi motion (experimental)");
@@ -628,9 +614,9 @@ static void send_setting_entities(void)
     }
     if (core_web_port) { PB(b, 128); pb_str(&b, 1, "web_ui_address"); pb_fixed32(&b, 2, KEY_WEB_URL); pb_str(&b, 3, "Web UI address");
       pb_str(&b, 5, "mdi:web"); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
-    /* online updates (update.c): the channel is picked on the settings page; the entity says what is new and installs it */
-    { PB(b, 128); pb_str(&b, 1, "firmware"); pb_fixed32(&b, 2, KEY_UPDATE); pb_str(&b, 3, "Firmware");
-      pb_uint(&b, 7, 1); pb_str(&b, 8, "firmware"); send_msg(LIST_UPDATE, &b); }
+    /* the running build (an update is pushed from the PC: scripts/ota-push.sh, so this is all Home Assistant needs to show) */
+    { PB(b, 128); pb_str(&b, 1, "firmware"); pb_fixed32(&b, 2, KEY_FIRMWARE); pb_str(&b, 3, "Firmware");
+      pb_str(&b, 5, "mdi:chip"); pb_uint(&b, 7, 2); send_msg(LIST_TEXT_SENSOR, &b); }
     /* which Echo is this: a diagnostic button with HA's "identify" class, as ESPHome's own devices offer */
     { PB(b, 128); pb_str(&b, 1, "identify"); pb_fixed32(&b, 2, KEY_IDENTIFY); pb_str(&b, 3, "Identify");
       pb_uint(&b, 7, 2); pb_str(&b, 8, "identify"); send_msg(LIST_BUTTON, &b); }
@@ -678,15 +664,6 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
         send_setting(key); return;
     }
     else if (type == SWITCH_COMMAND && key == KEY_SOUND_DETECTION) { core_sound(on); settings_save(); send_setting(key); return; }
-    else if (type == SELECT_COMMAND && key == KEY_UPDATE_CHANNEL) {
-        /* what this Echo runs is root's business: only Home Assistant with the key picks where it comes from */
-        int c = client_of(reply_fd);
-        for (int i = 0; i < 3; i++) if (!strcmp(opt, update_channels[i])) {
-            if (i == UPDATE_OFF || (c >= 0 && clients[c].keyed)) { update_channel(i); settings_save(); fprintf(stderr, "update: online updates %s\n", opt); }
-            else fprintf(stderr, "update: channel change refused, the request did not come over the keyed connection\n");
-        }
-        send_setting(key); send_setting(KEY_UPDATE); return;            /* the entity follows through update_changed */
-    }
     else if (type == SWITCH_COMMAND && key == KEY_WIFI_MOTION_ON && wifimotion_present()) {
         wifimotion_enable(on); settings_save(); send_setting(key); return;       /* the sensor follows through wifi_changed */
     }
@@ -1078,7 +1055,6 @@ static void bt_changed(void)
 }
 static void adb_changed(void) { pthread_mutex_lock(&core_lock); send_setting(KEY_ADB_WIFI); pthread_mutex_unlock(&core_lock); }
 static void wifi_changed(void) { pthread_mutex_lock(&core_lock); send_setting(KEY_WIFI_MOTION); pthread_mutex_unlock(&core_lock); }
-static void update_changed(void) { pthread_mutex_lock(&core_lock); send_setting(KEY_UPDATE); pthread_mutex_unlock(&core_lock); }
 
 static const struct ble_handler ble_handler = {
     .adverts = ble_adverts, .scan_changed = ble_changed, .slots_changed = ble_slots, .connection = ble_connection, .services = ble_db,
@@ -1381,7 +1357,7 @@ static void send_all_settings(void)
         send_setting(KEY_SS_UNPAIRED); send_setting(KEY_ADB_WIFI);
         send_setting(KEY_BT_OUT_SEARCH); send_setting(KEY_BT_OUT); send_setting(KEY_BT_OUT_STATUS); send_setting(KEY_BT_OUT_DELAY);
         for (int k = KEY_WIFI_MOTION_ON; k <= KEY_WIFI_MOTION_SENS; k++) send_setting(k);
-        send_setting(KEY_UPDATE_CHANNEL); send_setting(KEY_UPDATE); send_setting(KEY_WHISPERED);
+        send_setting(KEY_FIRMWARE);
         send_setting(KEY_TIMER_NAMES); send_setting(KEY_TIMER_RINGING);
         send_setting(KEY_DROPIN_PEER); send_setting(KEY_DROPIN_STATE);
         send_setting(KEY_ASSIST_VOLUME); send_setting(KEY_SOUNDS_VOLUME); send_setting(KEY_TIMER_VOLUME); send_setting(KEY_CALL_VOLUME);
@@ -1457,14 +1433,6 @@ static int handle(unsigned type, const unsigned char *p, size_t len)
             else if (f.field == 1 && f.v == KEY_TIMER_STOP) core_alarm_stop("Home Assistant's button");
             else if (f.field == 1 && f.v == KEY_DROPIN_END && listed(KEY_DROPIN_END)) dropin_hangup("Home Assistant's button");
         break; }
-    case UPDATE_COMMAND: {
-        unsigned key = 0, cmd = 0;
-        while (pb_next(&p, end, &f)) { if (f.field == 1) key = (unsigned)f.v; else if (f.field == 2) cmd = (unsigned)f.v; }
-        if (key != KEY_UPDATE) break;
-        if (cmd == UPDATE_CMD_CHECK) update_check();
-        else if (cmd == UPDATE_CMD_INSTALL && c >= 0 && clients[c].keyed) update_install();
-        else if (cmd == UPDATE_CMD_INSTALL) fprintf(stderr, "update: install refused, the request did not come over the keyed connection\n");
-    } break;
     case SUBSCRIBE_HA_ACTIONS: if (c >= 0) clients[c].actions = 1; break;
     case SUBSCRIBE_HA_STATES: if (c >= 0) clients[c].ha_states = 1; break;
     case HA_STATE: {
@@ -1606,7 +1574,7 @@ static void serve(int fd)
     { static int loaded; if (!loaded) { loaded = 1; have_light = !isnan(core_lux()); settings_load(); key_load();
                                        pthread_t t;
                                        pthread_create(&t, NULL, light_thread, NULL); pthread_detach(t);
-                                       adbwifi_start(adb_changed); wifimotion_start(wifi_changed); update_start(update_changed);
+                                       adbwifi_start(adb_changed); wifimotion_start(wifi_changed);
                                        if (core_bluetooth(-1)) { ble_start(&ble_handler); a2dp_start(bt_changed); } } }
     for (int i = 0; i < MAX_CLIENTS; i++) { if (clients[i].fd < 0 && slot < 0) slot = i; n += clients[i].fd >= 0; }
     if (slot >= 0) { clients[slot].fd = fd; clients[slot].states = clients[slot].enc = clients[slot].keyed = clients[slot].ble = clients[slot].ble_free = clients[slot].ble_user = clients[slot].actions = clients[slot].ha_states = 0; if (!n) core_link(1, 0); }
@@ -1716,7 +1684,6 @@ static void wake_event(const char *event)       /* lock held */
     if (listed(KEY_WAKE)) { send_state(EVENT, &b); fprintf(stderr, "wake event: %s\n", event); }
 }
 
-static void whispered(int on) { (void)on; send_setting(KEY_WHISPERED); }   /* lock held */
 static void timers_changed(void) { send_setting(KEY_TIMER_NAMES); send_setting(KEY_TIMER_RINGING); }   /* lock held: names first */
 /* lock held: whom first.  Each state as dropin.c's loop passed it, not the one it is in now: a refusal that came at once
  * still shows calling, then idle */
@@ -1736,5 +1703,5 @@ static void dropin_result(const char *result)   /* lock held */
 }
 
 const struct proto proto_esphome = { "esphome", 26053, 1, serve, start, audio, stop, cancel, played, volume_changed, mute_changed, print_mdns, bt_device,
-                                     arb_send, arb_changed, sound, whispered, arb_request, settings_changed, entities_changed, arb_scan,
+                                     arb_send, arb_changed, sound, arb_request, settings_changed, entities_changed, arb_scan,
                                      timers_changed, dropin_changed, dropin_result, button, wake_event };

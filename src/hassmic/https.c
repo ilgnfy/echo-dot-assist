@@ -2,7 +2,7 @@
  * Media over HTTPS (issue #30).  Home Assistant builds the URLs of TTS replies, announcements and play_media with
  * get_url(): when it serves HTTPS itself (http: ssl_certificate), that prefers the external URL and never hands out a
  * plain http:// one.  proto_esphome.c's own HTTP/1.0 client stays for http://; https:// goes through the firmware's
- * libcurl 7.50.1 (dlopen'ed, as in update.c and davs.c: OpenSSL and the system CA store, /system/etc/security/cacerts).
+ * libcurl 7.50.1 (dlopen'ed: OpenSSL and the system CA store, /system/etc/security/cacerts).
  * A thread runs the transfer and writes the body into one end of a socketpair; the other end goes to the decoders, so
  * they read it as they read a plain fetch, and the media player's cancel, a shutdown() of that socket, ends the
  * transfer too (the next write fails, and a write callback that returns short stops curl).

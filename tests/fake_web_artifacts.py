@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copying Amazon's artifacts (wake word sets, the newer sound detection model, the whisper model) from one Echo to another
+"""Copying models (wake word sets) from one Echo to another
 through the settings page's API (src/hassmic/artifacts.c), with two build/hassmic-host: listed with digests, read and
 written in pieces over signed requests with signed answers, checked on arrival (sizes, digest, the receiving engine
 loads it: pryon_test, faked here), then installed by root's scripts/device/artifact-install.sh, which this test runs
@@ -30,8 +30,7 @@ class Echo:
         os.chmod(fake, 0o755)
         self.env = dict(os.environ, HASSMIC_STATE=self.state, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw",
                         HASSMIC_PLAY=os.path.join(self.state, "play.raw"), HASSMIC_MDNS_FILE=os.path.join(self.state, "none"),
-                        HASSMIC_MODELS=os.path.join(self.data, "models"), HASSMIC_AED=os.path.join(self.data, "aed"),
-                        HASSMIC_WHISPER=os.path.join(self.data, "whisper"), HASSMIC_PRYON_TEST=fake)
+                        HASSMIC_MODELS=os.path.join(self.data, "models"), HASSMIC_PRYON_TEST=fake)
 
     def start(self):
         self.proc = subprocess.Popen([f"{ROOT}/build/hassmic-host", "-P", "esphome", "-p", str(self.port), "-n", self.name, "-L",
@@ -88,20 +87,19 @@ def main():
     # as Amazon's en-US sets are (issue 14): folders two levels deep, more than 64 files
     wake.update({f"nttfusionconfig/ntt_conv/c{i}.cfg.json": b"{}" for i in range(66)})
     broken = {"pryon.manifest": b"BROKEN\n", "x.bin": os.urandom(1000)}
-    aed = {"pryon.manifest": b"aed\n", "AED.json": b"{}", "model.mlp": os.urandom(50000)}
-    whisper = {"pryon_whisper.manifest": b"w\n", "HCLG.fst": os.urandom(300000),
-               "whisper_components/model.v8.0.mlp": os.urandom(CHUNK + 10), "whisper_components/dnn_vad.mlp": os.urandom(2000)}
-    a.model("models/echo-de-DE", wake); a.model("models/ziggy-de-DE", broken); a.model("aed", aed); a.model("whisper", whisper)
-    a.model("models/.try-x", {"pryon.manifest": b"half\n"})            # scripts/artifacts.sh testing one: not listed
+    comp = {"pryon.manifest": b"c\n", "model.mlp": os.urandom(300000),
+            "BDPGeneratedFiles/model.v8.0.mlp": os.urandom(CHUNK + 10), "BDPGeneratedFiles/dnn_vad.mlp": os.urandom(2000)}
+    a.model("models/echo-de-DE", wake); a.model("models/ziggy-de-DE", broken); a.model("models/computer-de-DE", comp)
+    a.model("models/.try-x", {"pryon.manifest": b"half\n"})            # one being tried: not listed
     a.start(); b.start()
     try:
         pa, pb = Browser(a.web), Browser(b.web)
         check(pa.login_with_button(a.proc) and pb.login_with_button(b.proc), "logged in to both with their action buttons")
         la = arts(pa)
         by = {x["id"]: x for x in la["artifacts"]}
-        check(set(by) == {"wake:echo-de-DE", "wake:ziggy-de-DE", "sound", "whisper"}, f"listed: the sets, sound and whisper models, no .try-: {sorted(by)}")
-        check(by["wake:echo-de-DE"]["digest"] == digest(wake) and by["sound"]["digest"] == digest(aed) and by["whisper"]["size"] == sum(map(len, whisper.values()))
-              and by["whisper"]["digest"] == digest(whisper),
+        check(set(by) == {"wake:echo-de-DE", "wake:ziggy-de-DE", "wake:computer-de-DE"}, f"listed: the sets, no .try-: {sorted(by)}")
+        check(by["wake:echo-de-DE"]["digest"] == digest(wake) and by["wake:computer-de-DE"]["size"] == sum(map(len, comp.values()))
+              and by["wake:computer-de-DE"]["digest"] == digest(comp),
               "digests as artifacts.c defines them (files in a folder by their path), sizes")
         check(arts(pb)["artifacts"] == [] and la["free"] > 0, "the target has none; free space reported")
         st = __import__("webclient").req(a.web, "GET", "/api/artifacts")[0]
@@ -110,47 +108,45 @@ def main():
         # a wake word set, in pieces (the big file takes four), from one Echo to the other
         st, r = copy(pa, pb, by["wake:echo-de-DE"])
         check(st == 200 and r.get("ok") and "arrived whole" in open(b.log).read(), f"wake word set copied and checked: {r}")
-        st, r = copy(pa, pb, by["whisper"], tamper=True)
-        check(st == 400 and "digest" in r["error"] and not os.path.exists(os.path.join(b.state, "artifacts", "whisper")),
+        st, r = copy(pa, pb, by["wake:computer-de-DE"], tamper=True)
+        check(st == 400 and "digest" in r["error"] and not os.path.exists(os.path.join(b.state, "artifacts", "wake.computer-de-DE")),
               f"a piece changed on the way: digest does not match, dropped: {r}")
         st, r = copy(pa, pb, by["wake:ziggy-de-DE"])
         check(st == 400 and "cannot load" in r["error"], f"a set this Echo's engine cannot load: refused: {r}")
-        st, r = copy(pa, pb, by["sound"])
-        check(st == 200, "the sound detection model copied")
         st, _, data = pb.call("POST", "/api/artifact/begin", b"wake:../etc " + b"0" * 64 + b"\npasswd 10\n")
         check(st == 400, f"an id with a path in it: refused: {data}")
         st, _, data = pb.call("POST", "/api/artifact/begin", b"wake:echo-en-US " + b"0" * 64 + b"\n../x 10\n")
         check(st == 400, f"a file name with a path in it: refused: {data}")
         st, _, data = pa.call("GET", "/api/artifact/read/wake:echo-de-DE/..%2Fx/0/10")
         check(st == 400, "reading outside the set: refused")
-        pb.call("POST", "/api/artifact/begin", f"whisper {by['whisper']['digest']}\nHCLG.fst 10\n".encode())
-        st, _, data = pb.call("POST", "/api/artifact/chunk/whisper/HCLG.fst/5", b"x" * 6)
+        pb.call("POST", "/api/artifact/begin", f"wake:computer-de-DE {by['wake:computer-de-DE']['digest']}\nmodel.mlp 10\n".encode())
+        st, _, data = pb.call("POST", "/api/artifact/chunk/wake:computer-de-DE/model.mlp/5", b"x" * 6)
         check(st == 400 and b"past the end" in data, "a piece past the end of its file: refused")
-        st, _, data = pb.call("POST", "/api/artifact/commit/whisper")
+        st, _, data = pb.call("POST", "/api/artifact/commit/wake:computer-de-DE")
         check(st == 400 and b"incomplete" in data, "commit with a file not whole: refused")
-        st, r = copy(pa, pb, by["whisper"])
-        check(st == 200, f"the whisper model with its folder copied: {r}")
+        st, r = copy(pa, pb, by["wake:computer-de-DE"])
+        check(st == 200, f"the set with its folder copied: {r}")
         st, _, data = pb.call("POST", "/api/artifact/begin", b"wake:echo-en-US " + b"0" * 64 + b"\na/b/c/x 10\n")
         check(st == 400, f"a file three folders down: refused: {data}")
-        check(sorted(arts(pb)["staged"]) == ["sound", "wake.echo-de-DE", "whisper"], f"ready to install: {arts(pb)['staged']}")
+        check(sorted(arts(pb)["staged"]) == ["wake.computer-de-DE", "wake.echo-de-DE"], f"ready to install: {arts(pb)['staged']}")
 
         # install: hassmic names them for root; root's installer puts them in place
         st, _, _ = pb.call("POST", "/api/artifact/install")
         req = open(os.path.join(b.state, "artifacts", "request")).read().split()
-        check(st == 200 and sorted(req) == ["sound", "wake:echo-de-DE", "whisper"], f"handed to root: {req}")
+        check(st == 200 and sorted(req) == ["wake:computer-de-DE", "wake:echo-de-DE"], f"handed to root: {req}")
         r = root_install(b)
         dst = os.path.join(b.data, "models", "echo-de-DE")
-        check(r.returncode == 0 and "OK wake:echo-de-DE" in r.stdout and "OK sound" in r.stdout
+        check(r.returncode == 0 and "OK wake:echo-de-DE" in r.stdout and "OK wake:computer-de-DE" in r.stdout
               and all(open(os.path.join(dst, n), "rb").read() == c for n, c in wake.items())
               and stat.S_IMODE(os.stat(dst).st_mode) == 0o755 and not os.path.exists(os.path.join(b.state, "artifacts", "wake.echo-de-DE")),
               f"root installed them (folder 755, staged copy gone): {r.stdout.strip()!r}")
-        wd = os.path.join(b.data, "whisper")
-        check("OK whisper" in r.stdout and all(open(os.path.join(wd, n), "rb").read() == c for n, c in whisper.items())
-              and stat.S_IMODE(os.stat(os.path.join(wd, "whisper_components")).st_mode) == 0o755
-              and stat.S_IMODE(os.stat(os.path.join(wd, "whisper_components", "dnn_vad.mlp")).st_mode) == 0o644,
-              "and the whisper model with its folder (755, files 644)")
-        check(arts(pb)["artifacts"] and {x["id"]: x for x in arts(pb)["artifacts"]}["whisper"]["digest"] == by["whisper"]["digest"],
-              "the target now lists the same whisper model")
+        wd = os.path.join(b.data, "models", "computer-de-DE")
+        check(all(open(os.path.join(wd, n), "rb").read() == c for n, c in comp.items())
+              and stat.S_IMODE(os.stat(os.path.join(wd, "BDPGeneratedFiles")).st_mode) == 0o755
+              and stat.S_IMODE(os.stat(os.path.join(wd, "BDPGeneratedFiles", "dnn_vad.mlp")).st_mode) == 0o644,
+              "and the set with its folder (755, files 644)")
+        check(arts(pb)["artifacts"] and {x["id"]: x for x in arts(pb)["artifacts"]}["wake:computer-de-DE"]["digest"] == by["wake:computer-de-DE"]["digest"],
+              "the target now lists the same set")
         check("OK wake:echo-de-DE" in arts(pb)["result"], "the result shows on the page")
 
         # root reads what is staged as the daemon: a link there is refused, never followed
@@ -179,7 +175,7 @@ def main():
         with open(os.path.join(b.state, "wake_word"), "w") as f: f.write("alexa-de\n")
         r = subprocess.run(["sh", f"{ROOT}/scripts/device/artifact-install.sh", "migrate", b.state, b.data], capture_output=True, text=True)
         names = sorted(os.listdir(os.path.join(b.data, "models")))
-        check(r.returncode == 0 and names == ["alexa-de-DE", "computer-it", "computer-it-IT", "echo-de-DE", "echo-en"]
+        check(r.returncode == 0 and names == ["alexa-de-DE", "computer-de-DE", "computer-it", "computer-it-IT", "echo-de-DE", "echo-en"]
               and open(os.path.join(b.state, "wake_word")).read().strip() == "alexa-de-DE",
               f"short names migrated (same set: dropped; different: both kept; en: left), active wake word followed: {names} {r.stdout.strip()!r}")
         r = subprocess.run(["sh", f"{ROOT}/scripts/device/artifact-install.sh", "migrate", b.state, b.data], capture_output=True, text=True)
@@ -189,7 +185,7 @@ def main():
         # restarted (root restarts hassmic): the set is in the wake word list's folder, with the same digest
         b.stop(); b.start()
         lb = {x["id"]: x for x in arts(pb)["artifacts"]}
-        check(lb.get("wake:echo-de-DE", {}).get("digest") == by["wake:echo-de-DE"]["digest"] and lb.get("sound", {}).get("digest") == by["sound"]["digest"]
+        check(lb.get("wake:echo-de-DE", {}).get("digest") == by["wake:echo-de-DE"]["digest"]
               and "wake:alexa-de-DE" in lb and "wake:echo-de" not in lb, "after the restart: the same sets on the target, under the long names")
         check("wake word: alexa-de-DE \"Alexa (de-DE)\" (de), active" in open(b.log).read(), "the migrated wake word is the active one")
     finally:

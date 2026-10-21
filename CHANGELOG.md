@@ -2,6 +2,15 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-10-22
+
+- **Nothing that needs Amazon or GitHub is left in the Echo's software.** Removed: the settings page's "Download from Amazon" (and
+  `scripts/artifacts.sh`), whisper detection (its sensor "Last request whispered" and setting: the model came only from that
+  download), and online updates from GitHub (the setting, and the firmware *update* entity). An update is pushed from your PC
+  (`scripts/ota-push.sh`, Wi-Fi or USB) and only your own key counts; the "Firmware" entity is now a plain text sensor with the
+  running version. The daemon no longer carries the groups that opened the secure hardware. Sound detection stays (the firmware's
+  model, off by default). Old settings exports that mention the removed settings still import.
+
 ## 2026-10-21
 
 - **Amazon's software can now be removed from the Echo Dot 3, not only stopped.** Until now Alexa's client, the cloud

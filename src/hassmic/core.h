@@ -37,7 +37,6 @@ struct proto {
     int  (*arb_send)(const char *node, const char *network, const char *key);
     void (*arb_changed)(void);                  /* may be NULL: arbitration membership or peers changed */
     void (*sound)(const char *event);           /* may be NULL: sound detection heard one of core_sound_events */
-    void (*whispered)(int on);                  /* may be NULL: the request just ended was whispered or not (core_whispered) */
     int  (*arb_request)(const char *entity);    /* may be NULL: ask Home Assistant once for an entity's state (arb.h) */
     void (*settings_changed)(void);             /* may be NULL: a setting changed elsewhere (web page): show them all again */
     void (*entities_changed)(void);             /* may be NULL: a feature went on or off: have the client list entities again */
@@ -73,9 +72,7 @@ void core_mic_off(void);                        /* server has heard enough */
 int  core_ha_linked(void);                     /* lock held: a client (Home Assistant) is connected */
 void core_settings_changed(void);
 void core_entities_changed(void);             /* lock held: a feature went on or off: the protocol lists its entities anew */
-int  core_whisper_model(void);                 /* a whisper model is loaded */
 int  core_sound_failed(void);                  /* sound detection's last start failed (its model did not load); any thread */
-void core_whisper_enable(int on);             /* whisper detection runs (with a model) */             /* lock held: settings.c changed one; the protocol shows it */
 void core_mic_level(int dbfs);                  /* speech level the pipeline gets: micgain.h */
 int  core_wake_sound_removal(int set);           /* our sounds taken out of what the pipeline gets (earsup.h), -1 reads */
 int  core_mic_denoise(int set);                 /* noise reduction on what the pipeline gets (micdenoise.h): 0 off .. 3 high, -1 reads */
@@ -137,8 +134,6 @@ int  core_led_brightness(int set);               /* 0..100; set >= 0 fixes the l
 float core_lux(void);                            /* light sensor in lux as stock reads it (no lock needed); NAN: none */
 /* Sound detection (sound.h): off by default.  The events Home Assistant may get, one per sound the model tells apart. */
 int  core_sound(int set);                        /* set: 0/1, or -1 to only read */
-int  core_whispered(void);                       /* the last request: 1 whispered, 0 not, -1 none scored yet, -2 no model
-                                                  * (whisper.h; no lock needed) */
 extern const char *const core_sound_events[];
 extern const int core_sound_nevents;
 /* The buttons for Home Assistant: a press and a hold (1 s) of each, in buttons.h's order (BUTTON_* * 2 + hold) */

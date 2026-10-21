@@ -84,14 +84,9 @@ while that mode is on.
 
 ## Updates
 
-Installed only when signed with your `secrets/update.key` (pushed from your PC) or with the project's release key
-(`keys/release.pub`; downloaded by hassmic itself, only once a channel is picked under "Online updates"). Root checks
-the signature, with the tool and keys from the system partition or the installed copy, before anything is unpacked.
-Your key also opens adb over Wi-Fi; the release key does not.
-
-Online updates mean trusting the project's releases: GitHub Actions builds and signs them
-(`.github/workflows/build.yml`) in a job that runs only for `main` and `release`, and its secret is the only copy of the
-release key besides the maintainer's. Only Home Assistant's encrypted link may switch the channel or install.
+Installed only when signed with your `secrets/update.key` (pushed from your PC). Root checks
+the signature, with the tool and key from the system partition or the installed copy, before anything is unpacked.
+Your key also opens adb over Wi-Fi. The Echo fetches no update from the internet.
 
 ## Bluetooth
 
@@ -99,14 +94,6 @@ release key besides the maintainer's. Only Home Assistant's encrypted link may s
 - **Setup from a phone (Improv)**: offered only without a network: to anyone in range on an Echo that is not set up
   (nothing to lose there), only after a press of the action button on one that is. The Wi-Fi password crosses
   Bluetooth unencrypted, as with every Improv device; the Echo keeps only the network key derived from it.
-
-## Amazon downloads
-
-The settings page's "Download from Amazon" registers the Echo to your Amazon account. Its tokens stay on the Echo
-(`state/davs`, readable by hassmic only) and never reach the page. To be let in, the Echo signs with its attestation
-key, which lives in the Echo's secure hardware: hassmic can ask it for a signature but never read it. For that the
-daemon carries the group that opens the secure hardware (`drmrpc`), on the Echo Dot 3 also the one of its certificate
-file (`keystore`). "Sign out" on the page removes the registration again.
 
 ## Factory reset
 

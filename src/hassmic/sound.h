@@ -10,7 +10,7 @@
 typedef void (*sound_cb)(const char *const *types, int n);
 
 int  sound_open(const char *const *types, int n, sound_cb cb);    /* the types to detect; 0: running */
-/* The model sound_open() takes, or took: Amazon's newer one (installed by scripts/artifacts.sh), the firmware's, or
+/* The model sound_open() takes, or took: one put in /data/local/hassmic/aed by hand, the firmware's, or
  * none (neither readable: nothing to switch on).  For the settings page; any thread. */
 enum sound_model { SOUND_NONE, SOUND_FIRMWARE, SOUND_NEWER };
 enum sound_model sound_model(void);

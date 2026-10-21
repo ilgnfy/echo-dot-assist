@@ -32,7 +32,6 @@ WIN_UNLOCK="An Echo Dot 2 can reportedly also be unlocked from Windows (not trie
 NOTES=(
     "adb over Wi-Fi is closed: scripts/adb-wifi.sh <echo-ip> (or debug access on the settings page, http://<echo-ip>:28931/) opens it for 30 min."
     "Updates: git pull, then scripts/ota-push.sh <echo-ip>."
-    "More wake words, whisper or sound detection models: the settings page, http://<echo-ip>:28931/ → \"Download from Amazon\"."
     "Music Assistant, Bluetooth speaker: $DDIR/README.md"
 )
 

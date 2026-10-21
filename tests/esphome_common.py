@@ -177,7 +177,6 @@ class Echo:
                    HASSMIC_ADB_OPEN=os.path.join(state, "adb-open.root"),      # on the Echo: in a directory only root writes
                    HASSMIC_LUX=os.path.join(state, "calibrated_lux"),          # the light sensor's sysfs file
                    HASSMIC_FAKE_SOUND="dogBark",                                # every window "hears" a dog (sound_none.c)
-                   HASSMIC_FAKE_WHISPER="1",                                    # a model, and every request whispered (whisper_none.c)
                    HASSMIC_FAKE_WIFI=os.path.join(state, "rx_stat"),            # what the Wi-Fi driver answers RX_STAT (wifimotion.c)
                    HASSMIC_CLOCK_SYNCED="0",                                    # an Echo whose clock nobody set (clock.c)
                    HASSMIC_FAKE_ADDRS=os.path.join(state, "addrs"),             # the Echo's addresses (netaddr.c)
