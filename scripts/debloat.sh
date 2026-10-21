@@ -130,7 +130,8 @@ while read -r -u 3 act a rest; do
             if [ "$(sh_ "grep -c '^service $s ' $f")" = 0 ]; then echo "removed  $f: $s"; else echo "PRESENT  $f: $s"; fi
         done ;;
     esac
-done 3< <(cat "$LIST" "${LIST%.list}-files.list" 2>/dev/null)
+# the default list brings every debloat-*.list beside it (files, the tested groups of pass 4, passes 6 and 7); a list named on the command line stands alone
+done 3< <(if [ -n "${2:-}" ]; then cat "$LIST"; else cat "$LIST" "${LIST%.list}"-*.list; fi)
 
 # the moves, in one go on the Echo (a few hundred adb calls would take minutes)
 if [ -s "$BATCH" ]; then

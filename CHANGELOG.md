@@ -16,6 +16,10 @@ What changed for people using the Echo, newest first. Details and measurements a
   Amazon" (new wake words and models) and Amazon's own factory reset. Not for the other models yet.
   Everything is in [docs/cloud-free.md](docs/cloud-free.md): what was removed and why, what stays, recovery, and how to do it
   on another firmware. By hand: `scripts/backup.sh`, then `scripts/debloat.sh apply`, reboot, `scripts/debloat.sh verify`.
+  Later the same day: a too large fourth step took the Wi-Fi libraries away (twelve of them are symbolic links to one file, which the
+  check did not see) and the Echo needed USB and TWRP to come back (`scripts/debloat-twrp.sh`). The removal now keeps every file a link
+  points at, runs in small groups that are each tested with a cold boot, and goes further (VPN and bug report tools, 32 dead service
+  definitions, 1452 files left, each described in `devices/donut/system-manifest.tsv` and `devices/donut/SYSTEM.md`).
 
 ## 2026-10-19
 

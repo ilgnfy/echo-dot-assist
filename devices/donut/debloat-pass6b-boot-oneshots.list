@@ -1,0 +1,7 @@
+# Pass 6, group b (2026-10-21): two local one-shots init starts at boot.  healthcheck = the factory line's check of idme dev_flags (fail_health_check ring on
+# failure); amzn_xo_tool copies an idme value to the property ro.amzn_xo.value, which nothing reads.  Neither touches the network.
+rc /system/etc/init/amzn_xo_tool.rc
+unstart /init.mt8516.rc healthcheck
+block /init.mt8516.rc healthcheck
+file /system/bin/healthcheck
+file /system/bin/amzn_xo_tool

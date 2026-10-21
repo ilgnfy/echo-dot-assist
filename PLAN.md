@@ -2162,6 +2162,10 @@ Run in this order. Each step says what it proves.
 
 ## Phase 6 — Amazon's services removed, not only stopped **(device)**
 
+Update 2026-10-21 (evening): the fourth pass (904 files at once) removed `libacehal_network_all.so`, the target of twelve Wi-Fi HAL symbolic links, and the Echo lost its
+Wi-Fi; recovered through USB wires and TWRP (`scripts/debloat-twrp.sh`).  Redone in tested groups (docs/cloud-free.md "The fourth pass"); passes 5-8 followed.  Open: the dead-man switch
+(restore the quarantine and reboot when there is no IP after N minutes), `purge`, other models' lists.
+
 Goal: nothing of Amazon's that can reach a cloud stays on the Dot 3's system partition or in its start-up; what is left is the audio
 engine, the light ring, the buttons, power and Wi-Fi.  Method, results and traps: [docs/cloud-free.md](docs/cloud-free.md).  Done on one Dot 3 on
 2026-10-21; slot A only, slot B untouched.

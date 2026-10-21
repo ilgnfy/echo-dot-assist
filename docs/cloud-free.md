@@ -48,7 +48,7 @@ Measured on a Dot 3 running hassmic 2026.10.06, cold boots, Home Assistant conne
 | Amazon services running that are cloud-facing | 16 that the live tests stopped one by one: `commsd`, `inloc_service`, `ace_blemesh_service`, `amakit_server`, `halo-*` (3), `tokend`, `dha_service`, `acedropboxd`, `ace_coex_metric`, `neo-*` (2), `perf*` (3) | **0** |
 | processes with the permission to open an internet socket | not counted | 5 in group `inet` (`hassmic`, `adbd` (gated), `dhcpcd`, `wpa_supplicant`, `netmgrd`) and the root-owned `avahi-daemon` and `kisd` (no sockets) |
 | firewall: packets reaching the final DROP | 0 | 0 |
-| `/system` used | 235 268 kB | 138 756 kB (-96.5 MB), everything purged |
+| `/system` used | 235 268 kB | 139 040 kB with the pass-4 to pass-8 files still in the quarantine (a move frees nothing; `purge` does), 138 756 kB after passes 1-3 were purged |
 | `MemAvailable` | 357 MB | 385-388 MB |
 | load average | about 7 | about 4-5 |
 | files removed | | 67 executables and scripts, about 230 libraries, 3 apps, about 40 init files, and 60 lines of start-up text (`start`/`stop`/`import` lines, data folders, one migration script call) |
@@ -279,13 +279,53 @@ the libraries build at run time. A file's use cannot be proven from outside; the
 - The automatic reboot after a week of high memory (`perfrecoveryd`). With hassmic at about 30 MB and 385 MB available it has not
   been needed; watch `MemAvailable` over a few weeks.
 
+## The fourth pass: what broke, and how it was done again
+
+Pass 4 (2026-10-21) moved 904 files in one go (232 "orphan" libraries, 592 spoken prompts, 54 UI sounds, 26 Sidewalk leftovers) and the Echo lost its Wi-Fi:
+no IP address, no ESPHome port, no adb; the buttons and the wake word still reacted (hassmic and the mixer were up).  Cause, found by reading the init files and
+the dynamic dependencies: `libace_netsvc_core.so` (the Wi-Fi manager, linked by `wifisvc`) needs twelve libraries (`libacehal_wifi.so`, `libacehal_network.so`,
+`libacehal_wifid.so`, ...) and **all twelve are symbolic links to one file, `libacehal_network_all.so`**, which the pass had moved.  The analysis walked
+regular files only (`find -type f`, `os.walk` with `isfile`), so it never saw a link and called the target an orphan.
+
+Recovery needed the USB wires (test pads TM3 GND, TM4 D-, TM5 D+; `devices/donut/README.md`), TWRP (Volume Up while plugging in power; the Echo shows up as
+`18d1:4ee2`, which a Mac may hold back until "Allow accessories to connect" is set to Always; a Linux PC just works) and `scripts/debloat-twrp.sh`, which mounts the
+active slot and puts everything in `/system/.debloat` back.  Wi-Fi and Home Assistant came back with the next boot.
+
+Lessons, all in the tools now:
+
+- A symbolic link is a use of its target.  `tools/debloat-analyze.py` keeps every link target, and `scripts/debloat.sh` builds the list of link targets on the Echo
+  and answers `KEPT <path> (a symbolic link points at it)` instead of moving one.  `tools/system-manifest.py` gives every link a row of its own.
+- A group is tested before the next one: a cold boot, `scripts/debloat.sh verify`, then the wake word, the buttons and Home Assistant.  With the USB wires on the board a mistake costs minutes; without them it is a dead Echo.
+- Libraries are not removed because their name looks harmless: the 51 with `network`, `wifi`, `audio`, `power`, `led`, `ota`, `device_info` or `button` in the name were
+  read and checked by hand (who names them, who maps them, which prefixes are completed at run time) before they went, in three groups.
+
+What was then applied, each with a cold boot and `verify` (lists beside `debloat.list`; `scripts/debloat.sh apply` reads all of them, a list named on the command line stands alone):
+
+| list | files | what |
+|---|---|---|
+| `debloat-pass4-1-sounds` | 646 | spoken Amazon prompts and the UI sounds hassmic does not play |
+| `debloat-pass4-2-vendor` | 63 | Sidewalk and A-GPS leftovers under `vendor/` |
+| `debloat-pass4-3-libs-safe` | 143 | libraries nothing names or links |
+| `debloat-pass4-4a-libs-tests-ota` | 33 | test, command line and OTA client libraries |
+| `debloat-pass5a-ota-metrics-cli` / `5b-network` / `5c-audio-wake-hal` | 8 / 5 / 5 | the 18 libraries held back: named by no file, mapped by no process, no run-time prefix |
+| `debloat-pass6a-devtools` / `6b-boot-oneshots` | 21 / 5 | VPN (racoon, mtpd, pppd), bug reports, Android framework helpers, OTA patchers, SoftHSM and Bluetooth command line tools; `healthcheck` and `amzn_xo_tool`, which init started once per boot |
+| `debloat-pass7-dead-services` | 5 edits | 32 service definitions whose program is not in the image (init logged "cannot find ..." for each at every boot), and the `import` lines of init files that do not exist |
+| `debloat-pass8-bmd` | 2 | two binary tables the manifest could not explain |
+
+Kept on purpose after a check, because they only look removable: `libacehal_network_all.so` and its links, `p2p_supplicant` (it is the Wi-Fi supplicant: the image starts the P2P-capable
+variant), `dnsmasq` / `hostapd` (the stock firewall script and the supplicant name them), `kvs_util` (its `kvs_init_completed` starts the button, power, thermal and input daemons), `enableswap`,
+`update_verifier` (marks the A/B slot successful), `idme`, `kisd` and `rpmb_svc` (keys).
+
+What is left, file by file and service by service, is in [`devices/donut/SYSTEM.md`](../devices/donut/SYSTEM.md) and `devices/donut/system-manifest.tsv` (1452 entries: 1291 required, 54 by-name, 107 platform, none unknown).
+
 ## Recovery
 
 | the Echo | how to bring it back |
 |---|---|
 | runs, something is wrong | `scripts/debloat.sh revert`, reboot (until you `purge`) |
 | runs, quarantine purged | restore the partition from the backup (TWRP or `dd` over adb; `RESTORE.md` in the backup folder) |
-| does not start | USB (wires on the test pads, see `devices/donut/README.md`): `adb reboot recovery` or Volume Up while plugging in power, then restore `system_a.img` |
+| does not start, quarantine not purged | USB (wires on the test pads, see `devices/donut/README.md`): Volume Up while plugging in power (white ring), then `bash scripts/debloat-twrp.sh` puts the quarantine back (add `--reboot`); on a Mac allow accessories first, or use a Linux PC |
+| does not start, quarantine purged | USB as above, then restore `system_a.img` from the backup |
 | bootloader gone | the bootrom exploit (kamakiri), a Linux PC, then the firmware as for a new Echo |
 
 The backup folder holds `persist`, `tee1`, `tee2`, `kb` and `dkb`: the Echo's own keys. They cannot be made again. Keep it, and keep it
@@ -309,6 +349,6 @@ Wi-Fi, only USB is left, so solder the USB wires before experimenting.
 
 - The seven ACE/MediaTek daemons above were identified from their libraries, who maps their client libraries and their logs (2026-10-21), not removed one by one.
   `ace_sensorsd` had no client and was removed and tested; `ace_thermald` and `kisd` have no client either but protect the hardware and the keys.
-- A fourth pass, not run: the setup-mode DNS leftovers (`dnsmasq`, `dnsmasq.conf`, `p2p_dnsmasq.sh`, its init service), `factory_reset`'s `fr_service`, `bootstat.rc`, and what the "reachable by name" files
-  show once re-counted. The 243 are mostly the ACE platform libraries the loaded daemons link.
+- A dead-man switch is not built yet: after `apply`, a flag that makes `main.sh` put the quarantine back and reboot when the Echo has no IP address after a few minutes (cleared by `verify`).  Until then the USB wires are the safety net.
+- `light blue flashes until Home Assistant is connected` and AirPlay 2 are in PLAN.md.
 - A tidy-up of hassmic's own dead code for what is gone (`davs.c`, `dha.c`, the `alexa-*` scripts) has not been done.

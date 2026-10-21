@@ -1,0 +1,24 @@
+# Pass 6, group a (2026-10-21): developer, VPN and OTA-patch tools that nothing starts: IPsec/L2TP VPN (racoon, mtpd, pppd; their init files are on demand,
+# `disabled`), bug reports (dumpstate, bugreport*), the Android framework helpers of an image without framework (monkey, bmgr, ime, appops), applypatch and bspatch
+# (OTA patching), schedtest, SoftHSM's command line tool, Amazon's Bluetooth command line clients.  Named by no running file (checked in docs/cloud-free.md).
+rc /system/etc/init/racoon.rc
+rc /system/etc/init/mtpd.rc
+rc /system/etc/init/dumpstate.rc
+file /system/bin/racoon
+file /system/bin/mtpd
+file /system/bin/pppd
+file /system/bin/dumpstate
+file /system/bin/bugreport
+file /system/bin/bugreportz
+file /system/bin/monkey
+file /system/bin/bmgr
+file /system/bin/schedtest
+file /system/bin/appops
+file /system/bin/ime
+file /system/bin/applypatch
+file /system/bin/bspatch
+file /system/bin/softhsm2-util
+file /system/bin/btclient
+file /system/bin/btclient_ble
+file /system/bin/lipc-tests/clean_lipc_env
+file /system/bin/lipc-tests/runtest

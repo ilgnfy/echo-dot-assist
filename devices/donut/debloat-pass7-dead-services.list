@@ -1,0 +1,11 @@
+# Pass 7 (2026-10-21): 32 service definitions whose program is not in the image (MediaTek / AOSP / Google leftovers).  init logs "cannot find '<path>',
+# disabling '<name>'" for each at every boot (dmesg); removing the definition (and the two start lines that name one) changes nothing but the log.
+unstart /init.mt8167.rc emsvr_user ged_srv
+block /init.aosp.rc healthd flash_recovery
+block /init.fireos-post.rc devicetype post-recovery
+block /init.connectivity.rc mnld MPED wifi2agps wmt_launcher wmt_loader
+block /init.mt8167.rc cmmb mediacodec OperaMaxSystem aal batterywarning bootlogoupdater DMAgent usbdongled emsvr_user extmdlogger featured ged_srv GoogleOtaAgent guiext-server met_log_d agpsd MtkCodecService NvRAMAgent poad pq program_binary slpd XoSetCap
+# The same for imports of init files that are not in the image (init logs "could not import file ..." at every boot).
+unimport /init.mt8167.rc init.volte.rc init.rilproxy.rc init.mal.rc init.fon.rc init.aee.rc FWUpgradeInit.rc
+unimport /init.mt8516.rc init.wifi.rc init.oobe.rc init.avahi-daemon.rc
+unimport /init.rc init.base.rc

@@ -1,0 +1,4 @@
+# Pass 8 (2026-10-21): the two files the manifest could not explain (usr/share/bmd/RFF*_501.bmd, 12 and 19 KB of binary tables): named by no file of the image and
+# mapped by no process; tried like any other group (cold boot, verify, wake word, buttons, Wi-Fi) because their purpose is not known.
+file /system/usr/share/bmd/RFFspeed_501.bmd
+file /system/usr/share/bmd/RFFstd_501.bmd

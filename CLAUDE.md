@@ -390,7 +390,7 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   three functions of `libperf_cpu_info_parser.so` when a mic stream opens; without `perfmonitord` each hangs 20 s (no wake word), so the library is
   replaced by the stub (install by write-and-rename: a mapped library must not change in place, and a replaced one blocks `remount ro` until the
   next boot).  Test every removal with a cold boot, the wake word and the buttons: a live `stop` does not show start-time dependencies.
-  `scripts/debloat.sh verify` is the check; `revert` undoes `apply` until `purge`.
+  `scripts/debloat.sh verify` is the check; `revert` undoes `apply` until `purge`.  A symbolic link is a use of its target (`find -type f` hides links; pass 4 moved the target of the twelve Wi-Fi HAL links and the Echo lost Wi-Fi): `debloat.sh` keeps link targets; apply a new group alone (`debloat.sh apply <list>`), cold-boot, `verify`, wake word, buttons.  `scripts/debloat-twrp.sh` puts the quarantine back from TWRP (USB wires needed).  `devices/donut/SYSTEM.md` + `system-manifest.tsv` (`tools/system-manifest.py`) describe every file left.
 - **Prebuilt** (`scripts/lib/build.sh`, `build_binaries`): deploy/install-system/ota-push/setup take the device binaries
   from the release CI published of HEAD (tag `v<commit time>[-beta]` pointing at HEAD, clean tree; bundle verified
   against `keys/release.pub`, marked `build/<codename>/PREBUILT`) where there is no NDK, or with `PREBUILT=1`;
