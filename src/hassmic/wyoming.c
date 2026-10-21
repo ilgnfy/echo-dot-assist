@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include "net.h"
 
 int wy_reader_init(struct wy_reader *r, int fd)
 {
@@ -29,14 +30,9 @@ static int read_n(int fd, void *dst, size_t n)
 
 int wy_read(struct wy_reader *r, struct wy_event *ev)
 {
-    size_t len = 0;
-    for (;;) {                                   /* header line; byte-wise is fine at this message rate */
-        char c; int rc = read_n(r->fd, &c, 1);
-        if (rc <= 0) return rc;
-        if (c == '\n') break;
-        if (len + 1 >= WY_MAX_JSON) return -1;
-        ev->json[len++] = c;
-    }
+    ssize_t got = net_read_until(r->fd, ev->json, WY_MAX_JSON, "\n", 0);      /* header line; data and payload stay */
+    if (got <= 0) return got < 0 ? -1 : 0;
+    size_t len = (size_t)got - 1;
     ev->json[len] = 0;
     if (!wy_json_str(ev->json, "type", ev->type, sizeof ev->type)) return -1;
 

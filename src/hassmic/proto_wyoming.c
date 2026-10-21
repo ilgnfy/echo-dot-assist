@@ -1,5 +1,6 @@
 /* Wyoming satellite protocol: Home Assistant connects to us (wyoming integration). */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -50,12 +51,13 @@ static void send_info(void)
     send_event("info", data, NULL, 0);
 }
 
-static void handle(const struct wy_event *ev)
+static void handle(int fd, const struct wy_event *ev)
 {
     const char *t = ev->type;
-    if (!strcmp(t, "audio-chunk")) { core_tts_data(ev->payload, ev->payload_len); return; }
-
     pthread_mutex_lock(&core_lock);
+    if (client != fd) { pthread_mutex_unlock(&core_lock); return; }     /* replaced by a newer connection: it is that one's */
+    if (!strcmp(t, "audio-chunk")) { pthread_mutex_unlock(&core_lock); core_tts_data(ev->payload, ev->payload_len); return; }
+
     if (!strcmp(t, "ping")) send_event("pong", NULL, NULL, 0);
     else if (!strcmp(t, "describe")) send_info();
     else if (!strcmp(t, "run-satellite")) { fprintf(stderr, "satellite: running\n"); core_link(1, 1); }
@@ -73,7 +75,10 @@ static void handle(const struct wy_event *ev)
         long rate = TTS_RATE, ch = 1, width = 2;
         wy_json_int(ev->json, "rate", &rate); wy_json_int(ev->json, "channels", &ch); wy_json_int(ev->json, "width", &width);
         if (width != 2) fprintf(stderr, "play: unsupported sample width %ld, expect noise\n", width);
-        core_tts_begin(rate, ch, 0);
+        /* straight into MixerOpenPlay: the mixer takes what TTS engines send, 8-48 kHz mono or stereo, and nothing
+         * else needs to reach it.  Refused, the chunks are dropped (no stream open) and audio-stop ends the reply. */
+        if (rate < 8000 || rate > 48000 || ch < 1 || ch > 2) fprintf(stderr, "play: refused audio-start with %ld Hz x%ld\n", rate, ch);
+        else core_tts_begin(rate, ch, 0);
     } else if (!strcmp(t, "audio-stop")) core_tts_end();
     else if (!strcmp(t, "error")) {
         char code[64] = "";
@@ -84,22 +89,27 @@ static void handle(const struct wy_event *ev)
     pthread_mutex_unlock(&core_lock);
 }
 
+/* One client at a time, and the newest wins: Home Assistant reconnects after a restart or a network change, often
+ * before the old connection is known to be dead, and anything else that connects (a scanner, a stray idle socket)
+ * must not keep it out.  Served one per thread, so the new connection can push the old one out. */
 static void serve(int fd)
 {
-    struct wy_reader rd; static struct wy_event ev;
-    if (wy_reader_init(&rd, fd) < 0) return;
+    struct wy_reader rd; struct wy_event *ev = malloc(sizeof *ev);
+    if (!ev || wy_reader_init(&rd, fd) < 0) { free(ev); return; }
     pthread_mutex_lock(&core_lock);
+    if (client >= 0) { fprintf(stderr, "client replaced by a new connection\n"); shutdown(client, SHUT_RDWR); }
     client = fd; core_link(1, 0);
     pthread_mutex_unlock(&core_lock);
     fprintf(stderr, "client connected\n");
 
-    while (wy_read(&rd, &ev) > 0) handle(&ev);
+    while (wy_read(&rd, ev) > 0) handle(fd, ev);
 
     pthread_mutex_lock(&core_lock);
-    client = -1; core_link(0, 0);
+    int was = client == fd;
+    if (was) { client = -1; core_link(0, 0); }
     pthread_mutex_unlock(&core_lock);
-    wy_reader_free(&rd);
-    fprintf(stderr, "client disconnected\n");
+    wy_reader_free(&rd); free(ev);
+    if (was) fprintf(stderr, "client disconnected\n");
 }
 
 static void print_mdns(void)
@@ -109,4 +119,4 @@ static void print_mdns(void)
            "  <service><type>_wyoming._tcp</type><port>%d</port></service>\n</service-group>\n", core_name, core_port);
 }
 
-const struct proto proto_wyoming = { "wyoming", 16700, 0, serve, start, audio, NULL, NULL, played, NULL, NULL, print_mdns, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
+const struct proto proto_wyoming = { "wyoming", 16700, 1, serve, start, audio, NULL, NULL, played, NULL, NULL, print_mdns, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };

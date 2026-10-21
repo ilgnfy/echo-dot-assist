@@ -35,10 +35,15 @@
 #include <unistd.h>
 #include "../third_party/monocypher.h"
 #include "adbwifi.h"
+#include "net.h"
 #include "netio.h"
 #include "statefile.h"
 
 #define MAX_BUNDLE (16u << 20)
+#define HEAD_MS    10000        /* the request line */
+#define SIGN_MS    20000        /* then the signature over the nonce: ota-push.sh signs in well under a second */
+#define BODY_MS    30000        /* signature and bundle: this, plus a second per MIN_RATE bytes it announced */
+#define MIN_RATE   (64u << 10)  /* bytes/s; Wi-Fi to the Echo does megabytes per second.  16 MiB: 4 min 46 s at most */
 static int port;
 
 static pthread_mutex_t handoff_lock = PTHREAD_MUTEX_INITIALIZER;     /* one bundle in state/ota/ at a time */
@@ -64,7 +69,7 @@ static int load_key(const char *path, uint8_t pk[32])
 }
 
 /* 0 if the peer signs "<line>\n" + a fresh nonce with the update key; otherwise it has been answered already. */
-static int challenge(int fd, const uint8_t pk[32], const char *line)
+static int challenge(int fd, const uint8_t pk[32], const char *line, long long by)
 {
     uint8_t msg[160], sig[64]; char hex[80]; size_t ll = strlen(line); int r = open("/dev/urandom", O_RDONLY);
     memcpy(msg, line, ll); msg[ll++] = '\n';
@@ -73,7 +78,7 @@ static int challenge(int fd, const uint8_t pk[32], const char *line)
     int n = sprintf(hex, "NONCE ");
     for (int i = 0; i < 32; i++) n += sprintf(hex + n, "%02x", msg[ll + i]);
     hex[n++] = '\n';
-    if (write_all(fd, hex, n) || read_full(fd, sig, 64) != 64) { reply(fd, "FAILED no signature"); return -1; }
+    if (write_all(fd, hex, n) || net_read_full_by(fd, sig, 64, by) != 64) { reply(fd, "FAILED no signature"); return -1; }
     if (crypto_eddsa_check(sig, pk, msg, ll + 32)) { reply(fd, "FAILED signature does not verify against this device's update key"); return -1; }
     return 0;
 }
@@ -115,9 +120,9 @@ void ota_healthy(void)
     if (store(dir, "healthy", "1\n", 2)) fprintf(stderr, "self test: cannot tell the installer\n");
 }
 
-static void adb_open(int fd, const uint8_t pk[32])
+static void adb_open(int fd, const uint8_t pk[32], long long by)
 {
-    if (challenge(fd, pk, "HMOTA-ADB1")) return;
+    if (challenge(fd, pk, "HMOTA-ADB1", by)) return;
     fprintf(stderr, "update: adb over Wi-Fi asked for with the update key\n");
     adbwifi_ask(1);
     for (int t = 0; t < 30; t++) {                      /* the firewall watcher looks every 5 s */
@@ -129,16 +134,21 @@ static void adb_open(int fd, const uint8_t pk[32])
 
 static void handle(int fd)
 {
-    char line[128], dir[280]; size_t i = 0; unsigned long len = 0; uint8_t sig[64], pk[32], *b;
-    struct timeval tv = { 30, 0 }; setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    while (i < sizeof line - 1 && read(fd, line + i, 1) == 1 && line[i] != '\n') i++;
-    line[i] = 0;
+    char line[128], dir[280]; unsigned long len = 0; uint8_t sig[64], pk[32], *b;
+    long long t0 = net_mono_ms();
+    /* One connection at a time, so each gets an end it cannot push out: a per-read timeout let a peer sending a byte
+     * every 29 s hold the port, and with it the adb way back in, for ever */
+    if (net_read_until(fd, line, sizeof line, "\n", t0 + HEAD_MS) <= 0) { reply(fd, "FAILED bad request"); return; }
+    line[strcspn(line, "\n")] = 0;
     int adb = !strcmp(line, "HMOTA-ADB1");
     if (!adb && (sscanf(line, "HMOTA-PUSH1 %lu", &len) != 1 || !len || len > MAX_BUNDLE)) { reply(fd, "FAILED bad request"); return; }
     if (!load_key(pub_path(), pk)) { reply(fd, "FAILED this device has no update key (install-system.sh installs it)"); return; }
-    if (adb) { adb_open(fd, pk); return; }
+    if (adb) { adb_open(fd, pk, t0 + HEAD_MS + SIGN_MS); return; }
     if (!(b = malloc(len))) { reply(fd, "FAILED out of memory"); return; }
-    if (read_full(fd, sig, 64) != 64 || read_full(fd, b, len) != (ssize_t)len) { reply(fd, "FAILED upload incomplete"); free(b); return; }
+    long long by = net_mono_ms() + BODY_MS + (long long)(len / MIN_RATE) * 1000;
+    if (net_read_full_by(fd, sig, 64, by) != 64 || net_read_full_by(fd, b, len, by) != (ssize_t)len) {
+        reply(fd, "FAILED upload incomplete or too slow"); free(b); return;
+    }
     if (crypto_eddsa_check(sig, pk, b, len)) { reply(fd, "FAILED signature does not verify against this device's update key"); free(b); return; }
 
     pthread_mutex_lock(&handoff_lock);

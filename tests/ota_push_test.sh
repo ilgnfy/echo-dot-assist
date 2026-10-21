@@ -8,8 +8,8 @@ $O keygen $T/k.sec $T/k.pub; $O keygen $T/evil.sec $T/evil.pub
 mkdir $T/state
 HASSMIC_STATE=$T/state HASSMIC_ADB_OPEN=$T/adb-open HASSMIC_UPDATE_PUB=$T/k.pub HASSMIC_SETTINGS=$T/settings build/hassmic-host -p 16971 -z 0 -o 16972 -L 2>$T/log &
 PID=$!; for i in $(seq 1 200); do nc -z 127.0.0.1 16972 && break; sleep 0.1; done      # bound in ~0.3 s alone, later with every test at once
-installer() {        # what ota_watch in main.sh does, once
-    for i in $(seq 1 40); do [ -f $T/state/ota/request ] && break; sleep 0.25; done
+installer() {        # what ota_watch in main.sh does, once; $1: how long to wait for a request (1/4 s)
+    for i in $(seq 1 ${1:-40}); do [ -f $T/state/ota/request ] && break; sleep 0.25; done
     [ -f $T/state/ota/request ] || return
     rm -f $T/state/ota/request
     if v=$($E install $T/k.pub $T/state/ota/bundle $T/state/ota/bundle.sig $T/installed 2>&1); then echo "OK $v" > $T/state/ota/result; else echo "FAILED $v" > $T/state/ota/result; fi
@@ -43,5 +43,17 @@ echo "$n1" | grep -qE '^NONCE [0-9a-f]{64}$' && [ "$n1" != "$n2" ]; ok $? "a new
 for i in $(seq 1 40); do [ -f $T/state/ota/healthy ] && break; sleep 0.25; done
 [ -f $T/state/ota/healthy ] && grep -q "self test: passed" $T/log; ok $? "self test passed, installer told (state/ota/healthy)"
 r=$(printf 'HMOTA-FACTORY1 9.9.9+test\n' | timeout 10 nc -N 127.0.0.1 16972 2>/dev/null || true); echo "$r" | grep -q "^FAILED bad request"; ok $? "no approval request any more: $r"
+# One connection at a time: one trickling a byte every 3 s (each read well inside any per-read timeout) must still be
+# cut off, and the push queued behind it go through
+python3 -c '
+import socket, select, time
+s = socket.create_connection(("127.0.0.1", 16972)); t = time.time(); got = b""
+while time.time() - t < 25 and not got:
+    s.sendall(b"H"); got = s.recv(200) if select.select([s], [], [], 3)[0] else b""
+print("%.0f %s" % (time.time() - t, got.decode().strip()))' > $T/trickle &
+TR=$!; sleep 0.5
+rm -rf $T/installed; installer 100 & r=$($O push 127.0.0.1 16972 $T/good.bundle $T/good.bundle.sig); wait $!; wait $TR
+read secs why < $T/trickle
+[ "$secs" -le 12 ] && [ "$why" = "FAILED bad request" ] && [ "$r" = "OK 9.9.9+test" ]; ok $? "a trickling connection is cut off after ${secs} s ($why), the push behind it: $r"
 kill $PID; rm -rf $T
 [ $fail = 0 ] && echo "all good" || { echo FAILED; exit 1; }

@@ -25,13 +25,7 @@ void ws_random(void *out, size_t len)
 
 static int read_headers(int fd, char *buf, size_t cap)      /* up to and including the blank line */
 {
-    size_t n = 0;
-    while (n < cap - 1) {
-        if (read(fd, buf + n, 1) != 1) return -1;
-        n++;
-        if (n >= 4 && !memcmp(buf + n - 4, "\r\n\r\n", 4)) { buf[n] = 0; return 0; }
-    }
-    return -1;
+    return net_read_until(fd, buf, cap, "\r\n\r\n", 0) > 0 ? 0 : -1;     /* the first frame may follow in the same segment */
 }
 
 static const char *header(const char *hdrs, const char *name, char *out, size_t outsz)
