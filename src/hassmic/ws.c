@@ -118,7 +118,7 @@ int ws_send(struct ws *w, int opcode, const void *data, size_t len) { return sen
 
 int ws_recv(struct ws *w, int *opcode, uint8_t **data, size_t *len)
 {
-    size_t total = 0; int first_op = 0;
+    size_t total = 0, max = w->max ? w->max : WS_MAX_MESSAGE; int first_op = 0;
     for (;;) {
         uint8_t h[2], ext[8], mask[4]; uint64_t n;
         if (read_full(w->fd, h, 2) != 2) return 0;
@@ -127,7 +127,7 @@ int ws_recv(struct ws *w, int *opcode, uint8_t **data, size_t *len)
         if (n == 126) { if (read_full(w->fd, ext, 2) != 2) return 0; n = ext[0] << 8 | ext[1]; }
         else if (n == 127) { if (read_full(w->fd, ext, 8) != 8) return 0; n = 0; for (int i = 0; i < 8; i++) n = n << 8 | ext[i]; }
         if (masked && read_full(w->fd, mask, 4) != 4) return 0;
-        if (n > WS_MAX_MESSAGE || total + n > WS_MAX_MESSAGE) return -1;
+        if (n > max || total + n > max) return -1;
         if (total + n + 1 > w->cap) {
             size_t cap = total + n + 1 + 4096; uint8_t *nb = realloc(w->buf, cap);
             if (!nb) return -1;

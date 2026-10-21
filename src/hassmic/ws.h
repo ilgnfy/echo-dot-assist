@@ -8,7 +8,9 @@
 
 enum { WS_TEXT = 1, WS_BINARY = 2, WS_CLOSE = 8, WS_PING = 9, WS_PONG = 10 };
 
-struct ws { int fd, client; uint8_t *buf; size_t cap; pthread_mutex_t wlock; };
+/* max: largest message ws_recv takes (0 = 4 MB).  The owner sets it after ws_accept / ws_connect, e.g. small until the
+ * peer has authenticated, so that a stranger cannot make us allocate megabytes. */
+struct ws { int fd, client; uint8_t *buf; size_t cap, max; pthread_mutex_t wlock; };
 
 int  ws_accept(struct ws *w, int fd, char *path, size_t pathsz);           /* server side; path of the GET, may be NULL */
 int  ws_connect(struct ws *w, const char *host, int port, const char *path);
