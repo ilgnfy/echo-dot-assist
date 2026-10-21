@@ -25,7 +25,7 @@ async def main(e):
         return n, {x.object_id: x for x in es}, sts
     # sound detection: off by default, no entity; on, one event entity reporting what the detector hears
     # (sound_none.c's dog, once per window of the capture: 3 s here), kept in the settings file
-    check("sound" not in by and "sound_detection" not in by and pv("sound_detection") == 0, "sound detection off by default: no entity in Home Assistant")
+    check("sound" not in by and "sound_detection" in by and pv("sound_detection") == 0, "sound detection off by default: its switch is there, the event entity is not")
     page.set(sound_detection="on")
     c, cby, st3 = await relist(c)
     ev = cby.get("sound")
@@ -58,8 +58,8 @@ async def main(e):
     check("sound" not in cby and conf().get("sound_detection") == "off", "sound detection switched off again: the entity gone")
     # Wi-Fi motion (experimental): off by default, the sensor unknown while off; on, a still level is no motion, a
     # wobbling one is, and it clears after the hold (3 s in the PC build, 30 s on the Echo)
-    check("wifi_motion" not in cby and "wifi_motion_detection" not in cby and pv("wifi_motion") == 0 and pv("wifi_motion_sensitivity") == 5,
-          "Wi-Fi motion off by default (sensitivity 5): no entity in Home Assistant")
+    check("wifi_motion" not in cby and "wifi_motion_detection" in cby and pv("wifi_motion") == 0 and pv("wifi_motion_sensitivity") == 5,
+          "Wi-Fi motion off by default (sensitivity 5): its switch is there, the sensor is not")
     page.set(wifi_motion="on")
     c, cby, st3 = await relist(c)
     wbs, wsn = cby.get("wifi_motion"), cby.get("wifi_motion_sensitivity")

@@ -4,7 +4,7 @@ info, entities and settings, the voice assistant (mic stream, wake words, replie
 streaming TTS), announcements over HTTP and HTTPS, do not disturb, volume, mute.  The rest of the API in
 fake_ha_esphome_{timers,features,buttons,address}.py."""
 import asyncio, os, signal, subprocess
-from aioesphomeapi import SwitchInfo, NumberInfo, NumberState, SwitchState, TextSensorInfo, TextSensorState, SensorInfo
+from aioesphomeapi import SelectInfo, SwitchInfo, NumberInfo, NumberState, SwitchState, TextSensorInfo, TextSensorState, SensorInfo
 from aioesphomeapi import APIClient, MediaPlayerInfo, MediaPlayerEntityState, VoiceAssistantEventType as Ev, BinarySensorInfo, BinarySensorState
 from esphome_common import ROOT, check, until, sync, peak, speech, settled, run
 
@@ -27,15 +27,18 @@ async def main(e):
     cli.subscribe_states(states.append)
     by = {e.object_id: e for e in entities}
     check("noise_suppression_level" not in by and "auto_gain" not in by and "mic_volume_multiplier" not in by
-          and "mic_level" not in by and "noise_reduction" not in by
-          and isinstance(by.get("mute"), SwitchInfo) and isinstance(by.get("wake_sound"), SwitchInfo), "settings entities listed: the lean set")
+          and isinstance(by.get("mic_level"), NumberInfo) and isinstance(by.get("noise_reduction"), SelectInfo)
+          and isinstance(by.get("mute"), SwitchInfo) and isinstance(by.get("wake_sound"), SwitchInfo),
+          "settings entities listed: mic level, noise reduction, mute, wake sound (the retired ones are gone)")
     ps = {x["name"]: x for x in page.state()["settings"]}
     check((ps["mic_level"]["min"], ps["mic_level"]["max"]) == (-35, -15) and ps["noise_reduction"]["choices"] == ["off", "low", "medium", "high"],
           "mic level and noise reduction on the settings page")
     tok = by.get("sendspin_pairing_token")
     check(isinstance(tok, TextSensorInfo) and tok.disabled_by_default and int(tok.entity_category) == 2, "Sendspin pairing token entity: diagnostic, disabled by default")
-    check("soc_temperature" not in by and "cpu_usage" not in by and page.state()["diag"]["cpu"] is not None,
-          "diagnostics on the settings page, not in Home Assistant")
+    soc, cpu = by.get("soc_temperature"), by.get("cpu_usage")
+    check(isinstance(soc, SensorInfo) and isinstance(cpu, SensorInfo) and soc.disabled_by_default and cpu.disabled_by_default
+          and int(soc.entity_category) == 2 and page.state()["diag"]["cpu"] is not None,
+          "SoC temperature and CPU usage: diagnostic sensors, disabled by default in Home Assistant, and on the settings page")
     check(pv("mic_level") == -26, f"mic level at its default after a settings file from before it: {pv('mic_level')}")
     eqs = [by.get(k) for k in ("equalizer_bass", "equalizer_mid", "equalizer_treble")]
     await until(lambda: any(isinstance(x, NumberState) and x.key == eqs[0].key for x in states))
@@ -69,8 +72,8 @@ async def main(e):
           and [x.state for x in states if isinstance(x, TextSensorState) and x.key == wu.key] == [f"http://127.0.0.1:{WEB}"],
           "Web UI address entity: diagnostic, enabled, the settings page at the address Home Assistant connected to")
     apeers = by.get("arbitration_peers")
-    check("arbitration_id" not in by and "join_arbitration_network" not in by and pv("arbitration") == 1 and isinstance(apeers, SensorInfo),
-          "arbitration on by default (the page), peers sensor, no ID entity, no join switch")
+    check("arbitration_id" not in by and isinstance(by.get("join_arbitration_network"), SwitchInfo) and pv("arbitration") == 1 and isinstance(apeers, SensorInfo),
+          "arbitration on by default, the join switch and the peers sensor, no ID entity")
     svcs = (await cli.list_entities_services())[1]
     check(sorted((v.name, [(x.name, int(x.type)) for x in v.args]) for v in svcs) == [("arbitration_key", [("network", 3), ("key", 3)]), ("drop_in", [("target", 3)])],
           "actions \"arbitration_key\" (network, key: strings) for other Echos to hand over their network, \"drop_in\" (target: string)")
@@ -294,7 +297,7 @@ async def main(e):
     check(not started.is_set(), "mute switch blocks triggers")
     cli.switch_command(by["mute"].key, False); await until(lambda: last(by["mute"].key, SwitchState) is False)
 
-    # Debug access: on the settings page only, with a press of its own (tests/fake_web.py)
-    check("debug_access_adb" not in by, "no debug access switch in Home Assistant")
+    # Debug access: a switch in Home Assistant, taken only over the keyed connection (tests/fake_web.py: the page, with a press of its own)
+    check(isinstance(by.get("debug_access_adb"), SwitchInfo), "debug access switch in Home Assistant (the keyed connection opens it)")
 
 run(main, (PORT, HTTP_PORT, WEB, HTTPS_PORT, SELF_PORT))

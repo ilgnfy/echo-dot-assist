@@ -94,11 +94,9 @@ async def main():
 
         # Home Assistant: the lean list, and what the page changes
         ha, by, states = await ha_connect()
-        page_only = {"mic_level", "noise_reduction", "sound_detection", "debug_access_adb", "join_arbitration_network",
-                     "bluetooth_announcements", "bluetooth_announcement_language", "soc_temperature", "cpu_usage", "wifi_motion_detection",
-                     "speaker_gain"}
+        page_only = {"speaker_gain"}
         check(not page_only & set(by) and {"wake_sound", "mute", "do_not_disturb", "firmware", "equalizer_bass", "led_brightness"} <= set(by),
-              f"Home Assistant lists the lean set only: {sorted(set(by))}")
+              f"Home Assistant lists what the page keeps to itself nowhere, and the set: {sorted(set(by))}")
         check("sound" in by and "arbitration_peers" in by and "arbitration_key" in by,
               "features that are on: their entities (sound, arbitration)")
         r = b.set(mic_level=-30, wake_sound="off"); await until(lambda: states.get(by["wake_sound"].key) is False)

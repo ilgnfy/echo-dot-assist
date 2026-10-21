@@ -12,6 +12,12 @@ What changed for people using the Echo, newest first. Details and measurements a
   model, off by default). Old settings exports that mention the removed settings still import.
 
 ## 2026-10-21
+- **Light only part of the ring, or each LED in a colour of its own** (issue #57). Home Assistant's "Light ring fill"
+  (0 to 100 %) lights that share of the ring in the light's colour, for a timer's or a washing machine's progress or
+  a battery level; it fills the way the volume does. "Light ring rotation" (Home Assistant's configuration, or the
+  settings page under Lights) turns where it starts, LED by LED. The action "light_ring_leds" gives each LED a colour
+  of its own. The effects (pulse, spin, blink, rainbow) stay for the whole ring. The Echo installs its ring animations
+  once more at the first start with this version (a second without light). Thanks to abercrombie1892 for the idea.
 
 - **Amazon's software can now be removed from the Echo Dot 3, not only stopped.** Until now Alexa's client, the cloud
   services, telemetry, firmware updates and the rest stayed on the Echo, were started at every boot and stopped again by
