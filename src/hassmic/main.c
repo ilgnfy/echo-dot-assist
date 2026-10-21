@@ -213,7 +213,7 @@ static const struct proto *proto = &proto_esphome;
 
 pthread_mutex_t core_lock = PTHREAD_MUTEX_INITIALIZER;
 static int connected, satellite_running;
-static enum state state;
+static _Atomic(enum state) state;              /* changed under core_lock; the audio threads peek without it (core.h) */
 static time_t state_since;
 static atomic_int streaming, trigger_pending, button_pending, pair_pending, stop_pending, quit;
 static atomic_int flush_playback, alarm_on;   /* barge-in: drop queued TTS; a finished timer rings */

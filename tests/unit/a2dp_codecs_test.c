@@ -75,4 +75,57 @@ static int test_opus(void)
     return verdict(c->name);
 }
 
-int main(void) { return test_aptx(0) | test_aptx(1) | test_opus(); }
+/* AAC's in-band configuration (LATM StreamMuxConfig), bit by bit as Android's and PipeWire's FDK encoder writes it:
+ * useSameStreamMux 0, audioMuxVersion 0, allStreamsSameTimeFraming 1, numSubFrames 0, numProgram 0, numLayer 0, then
+ * the AudioSpecificConfig: object type 5 bits, rate index 4, channels 4, and what FFmpeg reads after it */
+static size_t latm(unsigned char *p, int version, unsigned aot, unsigned sfi, unsigned ch)
+{
+    unsigned long long v = 0; int n = 0;
+#define PUT(bits, k) (v = v << (k) | (bits), n += (k))
+    PUT(0, 1); PUT(version, 1);
+    if (version) { PUT(0, 1); PUT(0, 2); PUT(0xff, 8); }    /* audioMuxVersionA, taraBufferFullness (1 byte) */
+    PUT(1, 1); PUT(0, 6); PUT(0, 4); PUT(0, 3);
+    if (version) { PUT(0, 2); PUT(2, 8); }                  /* ascLen */
+    PUT(aot, 5); PUT(sfi, 4); PUT(ch, 4); PUT(0, 3);
+#undef PUT
+    size_t bytes = (n + 7) / 8; v <<= 8 * bytes - n;
+    for (size_t i = 0; i < bytes; i++) p[i] = v >> 8 * (bytes - 1 - i);
+    memset(p + bytes, 0x55, 8);                             /* the frame itself: not looked at */
+    return bytes + 8;
+}
+
+static int test_latm(void)
+{
+    unsigned char p[32]; int ok = 1, cfg = 0; size_t n;
+    struct { int version; unsigned aot, sfi, ch, rate, nch; int want; const char *what; } t[] = {
+        { 0, 2, 4, 2, 44100, 2, 1, "AAC LC 44.1 kHz stereo" },
+        { 0, 2, 3, 2, 48000, 2, 1, "AAC LC 48 kHz stereo" },
+        { 1, 2, 3, 1, 48000, 1, 1, "audioMuxVersion 1, mono" },
+        { 0, 2, 3, 2, 44100, 2, 0, "48 kHz where 44.1 was negotiated" },
+        { 0, 2, 0, 2, 48000, 2, 0, "96 kHz" },
+        { 0, 2, 15, 2, 48000, 2, 0, "explicit rate" },
+        { 0, 5, 3, 2, 48000, 2, 0, "SBR object type" },
+        { 0, 2, 3, 0, 48000, 2, 0, "channels from a program config element" },
+        { 0, 2, 3, 6, 48000, 2, 0, "5.1" },
+        { 0, 2, 3, 2, 48000, 1, 0, "stereo where mono was negotiated" },
+    };
+    for (size_t i = 0; i < sizeof t / sizeof *t; i++) {
+        cfg = 0; n = latm(p, t[i].version, t[i].aot, t[i].sfi, t[i].ch);
+        int got = a2dp_latm_check(p, n, t[i].rate, t[i].nch, &cfg);
+        if (got != t[i].want) { printf("FAIL AAC config %s: %s\n", t[i].what, got ? "accepted" : "refused"); ok = 0; }
+    }
+    unsigned char same[4] = { 0x80, 0x55, 0x55, 0x55 };    /* useSameStreamMux */
+    cfg = 0;
+    if (a2dp_latm_check(same, 4, 48000, 2, &cfg)) { printf("FAIL AAC: reused configuration without one seen\n"); ok = 0; }
+    n = latm(p, 0, 2, 3, 2);
+    a2dp_latm_check(p, n, 48000, 2, &cfg);
+    if (!a2dp_latm_check(same, 4, 48000, 2, &cfg)) { printf("FAIL AAC: reused good configuration refused\n"); ok = 0; }
+    n = latm(p, 0, 2, 0, 2);                                /* a bad one in between: the old one counts no more */
+    a2dp_latm_check(p, n, 48000, 2, &cfg);
+    if (a2dp_latm_check(same, 4, 48000, 2, &cfg)) { printf("FAIL AAC: reused configuration after a bad one\n"); ok = 0; }
+    if (a2dp_latm_check(p, 1, 48000, 2, &cfg)) { printf("FAIL AAC: cut configuration accepted\n"); ok = 0; }
+    printf("%s AAC     in-band configuration checks\n", ok ? "ok  " : "FAIL");
+    return !ok;
+}
+
+int main(void) { return test_aptx(0) | test_aptx(1) | test_opus() | test_latm(); }

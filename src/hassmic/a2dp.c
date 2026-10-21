@@ -7,8 +7,9 @@
  *   GAP       page scan whenever a paired device exists (it connects to us, we never page), inquiry scan only while
  *             pairing.  Class of device: audio / loudspeaker.  One source streams at a time, MAX_LINKS may be connected.
  *   pairing   Secure Simple Pairing, NoInputNoOutput (Just Works: the phone asks its user, we accept), legacy PIN 0000
- *             for old devices; both only while pairing is on.  Link keys in state/bt_keys (0600).  Connections from
- *             unknown devices are refused outside the pairing window.
+ *             for old devices; both only while pairing is on.  Link keys in state/bt_keys (0600), kept when a device
+ *             says it has none (it may be another one under that address).  Connections from unknown devices are
+ *             refused outside the pairing window.
  *   L2CAP     basic mode, we accept channels (SDP, AVDTP, AVCTP) and open only AVCTP, when the device has not 2 s after
  *             AVDTP (BlueZ does not always).  AVDTP and AVCTP need an encrypted link: a device that asks before
  *             encrypting gets "pending" while we authenticate and encrypt.
@@ -166,7 +167,8 @@ static struct link {
     char name[80]; int named, told;             /* the device's name (Remote Name Request), asked yet; connect announced */
 } links[MAX_LINKS];
 
-static unsigned acl_len = 27, acl_num = 1; static int credits;
+static unsigned acl_len = 27, acl_num = 1;
+static int own_credits, *credits = &own_credits;        /* or ble.c's, when LE has no buffers of its own (hci_acl_pool) */
 struct frag { struct frag *next; int handle; size_t len; unsigned char b[]; };
 static struct frag *fhead, **ftail = &fhead;
 
@@ -176,10 +178,10 @@ static struct chan *chan_by(struct link *l, int lcid) { for (int i = 0; i < MAX_
 
 static void acl_flush(void)
 {
-    while (fhead && credits > 0) {
+    while (fhead && *credits > 0) {
         struct frag *f = fhead; struct link *l = link_by(f->handle);
         if (!(fhead = f->next)) ftail = &fhead;
-        if (l) { l->queued--; if (hci_write(f->b, f->len) < 0) fprintf(stderr, "a2dp: ACL write failed\n"); else { credits--; l->unacked++; } }
+        if (l) { l->queued--; if (hci_write(f->b, f->len) < 0) fprintf(stderr, "a2dp: ACL write failed\n"); else { (*credits)--; l->unacked++; } }
         free(f);
     }
 }
@@ -265,7 +267,8 @@ static void config_req_rx(struct link *l, unsigned id, const unsigned char *d, s
     put16(r, c->rcid); put16(r + 2, flags & 1); put16(r + 4, 0);
     for (size_t i = 4; i + 2 <= n && i + 2 + d[i + 1] <= n; i += 2 + d[i + 1]) {
         unsigned type = d[i] & 0x7f, len = d[i + 1];
-        if (type == 0x01 && len >= 2) c->rmtu = u16(d + i + 2);
+        if (type == 0x01 && len >= 2) c->rmtu = u16(d + i + 2) < 48 ? 48 : u16(d + i + 2);    /* below the L2CAP minimum
+                                                       (48) nothing fits: SDP answers and speaker packets assume more */
         else if (type == 0x04 && len >= 1 && d[i + 2] != 0) {                      /* not basic mode: offer basic */
             static const unsigned char basic[11] = { 0x04, 9 };
             put16(r + 4, 1); memcpy(r + 6, basic, 11); rn = 17; break;
@@ -379,11 +382,11 @@ static size_t de(const unsigned char *p, size_t n, unsigned *type, size_t *len)
     if (!n) return 0;
     unsigned s = p[0] & 7; *type = p[0] >> 3;
     if (*type == 0) { *len = 0; return 1; }
-    if (s < 5) { *len = 1u << s; return *len + 1 <= n ? 1 : 0; }
+    if (s < 5) { *len = 1u << s; return *len <= n - 1 ? 1 : 0; }
     size_t h = s == 5 ? 2 : s == 6 ? 3 : 5;
     if (n < h) return 0;
     *len = s == 5 ? p[1] : s == 6 ? (size_t)(p[1] << 8 | p[2]) : (size_t)p[1] << 24 | p[2] << 16 | p[3] << 8 | p[4];
-    return h + *len <= n ? h : 0;
+    return *len <= n - h ? h : 0;                       /* not h + *len <= n: a 32-bit length wraps that on the Echo */
 }
 
 /* a UUID element as a 16-bit value; -1 if it is not one of the Bluetooth base UUIDs */
@@ -521,7 +524,8 @@ static void sdp_rx(struct link *l, struct chan *c, const unsigned char *p, size_
 
 /* ---------------------------------------------------------------- audio: jitter buffer and player */
 
-#define RING_FRAMES 48000                               /* 1 s of stereo at 48 kHz */
+#define RING_MAX_RATE 48000                             /* the most any endpoint of ours negotiates */
+#define RING_FRAMES RING_MAX_RATE                       /* 1 s of stereo at 48 kHz */
 static int16_t ring[RING_FRAMES * 2];
 static size_t r_head, r_count; static unsigned r_rate;  /* r_lock */
 static long r_dropped;
@@ -536,6 +540,9 @@ static atomic_llong button_paused_at;                   /* the action button pau
 
 static void ring_push(const int16_t *pcm, unsigned frames, unsigned ch, unsigned rate)
 {
+    /* The player's buffers are sized for 48 kHz.  The codecs hold to what was negotiated (AAC checks what it decodes,
+     * a2dp_codecs.c), this is the last line: a higher rate from the radio never reaches the player. */
+    if (rate < 8000 || rate > RING_MAX_RATE || !ch) return;
     pthread_mutex_lock(&r_lock);
     if (rate != r_rate) { r_rate = rate; r_count = 0; }
     for (unsigned i = 0; i < frames; i++) {
@@ -582,12 +589,16 @@ static void *player(void *arg)
         double err = avg - PREBUF_MS, ratio;
         base += err * 1e-7; base = base < 0.99 ? 0.99 : base > 1.01 ? 1.01 : base;
         ratio = base + (err < -100 ? -100 : err > 100 ? 100 : err) * 2e-5;
+        if (chunk > MAXCHUNK) chunk = MAXCHUNK;             /* ring_push keeps rates <= 48 kHz; buf must hold whatever */
         acc += chunk * ratio;
         size_t n = (size_t)acc, out = chunk;
         if (n > MAXCHUNK + 7) n = MAXCHUNK + 7;
         if (n > have) { n = have; out = (size_t)(n / ratio); acc = 0; if (!out) out = 1; } else acc -= n;
+        if (out > MAXCHUNK) out = MAXCHUNK;                 /* n / ratio with ratio < 1: a few frames over */
         for (size_t i = 0; i < n; i++) { size_t at = (r_head + i) % RING_FRAMES * 2; in[2 * i] = ring[at]; in[2 * i + 1] = ring[at + 1]; }
         r_head = (r_head + n) % RING_FRAMES; r_count -= n;
+        long dropped = r_dropped; r_dropped = 0;
+        pthread_mutex_unlock(&r_lock);                      /* resampled outside: the HCI thread pushes meanwhile */
         for (size_t j = 0; j < out; j++) {                  /* position in the input, prev being index -1 */
             double pos = -1 + (j + 1) * (double)n / out; long i0 = (long)floor(pos); double f = pos - i0;
             for (int c = 0; c < 2; c++) {
@@ -596,8 +607,6 @@ static void *player(void *arg)
             }
         }
         if (n) { prev[0] = in[2 * n - 2]; prev[1] = in[2 * n - 1]; }
-        long dropped = r_dropped; r_dropped = 0;
-        pthread_mutex_unlock(&r_lock);
         if (dropped) fprintf(stderr, "a2dp: buffer full, %ld frames dropped\n", dropped);
 
         if (open && rate != rr) { bt_close(); open = 0; }
@@ -605,7 +614,8 @@ static void *player(void *arg)
             if (bt_open(rr, 2)) { usleep(200000); continue; }
             open = 1; rate = rr; fprintf(stderr, "a2dp: output open, %u Hz\n", rr);
         }
-        if (core_state() != IDLE) for (size_t i = 0; i < 2 * out; i++) buf[i] /= 6;     /* duck under the voice assistant */
+        if (core_state() != IDLE) for (size_t i = 0; i < 2 * out; i++) buf[i] /= 6;     /* duck under the voice assistant
+                                                                                       (a snapshot without core_lock) */
         while (bt_queued_us() > MIXER_US) usleep(5000);
         for (size_t i = 0; i < 2 * out; i++) { int v = buf[i] < 0 ? -buf[i] : buf[i]; if (v > peak) peak = v; }
         if (bt_write(buf, out * 4) < 0) fprintf(stderr, "a2dp: mixer write failed\n");
@@ -980,6 +990,7 @@ static void avrcp_upkeep(void)
 #define OUT_SEID 0x30                   /* our source endpoint; the sink endpoints are 1..nseps */
 #define OUT_BITPOOL 53                  /* SBC "high quality" for joint stereo 44.1 kHz: 328 kbit/s */
 #define OUT_SEARCH_S 60
+#define OUT_PAIR_S 120                  /* after the search found it: to page it and pair (speakers leave pairing mode too) */
 #define OUT_DELAY_MS 250                /* default latency of a speaker for Sendspin (SBC sinks buffer 150..250 ms) */
 
 enum { O_IDLE, O_DISCOVER, O_CAPS, O_SETCONF, O_OPEN, O_ACP, O_MEDIA, O_READY, O_START, O_STREAMING, O_SUSPEND };
@@ -994,6 +1005,7 @@ static struct {
     int sig_lcid; long long sig_at, int_at;             /* AVDTP signalling we opened, when; when we configure */
     int absvol, sent_v; long long avol_at;              /* AVRCP absolute volume (A_*), the value we set last */
     long long next_page; int paging, failures, pairing, psrm, clock, delay_report;
+    long long pair_until;                               /* pairing: the search's window to pair in ends */
 } out;
 static pthread_mutex_t out_lock = PTHREAD_MUTEX_INITIALIZER;          /* out.name for other threads */
 static atomic_int out_on_req = -1, out_search_req = -1, out_searching, out_enabled, out_delay = OUT_DELAY_MS, out_save_req,
@@ -1002,7 +1014,9 @@ static long long search_until; static int inquiring;
 static struct { uint64_t addr; int rssi, psrm, clock; char name[80]; } cand;
 
 static int is_speaker(const struct link *l) { return out.addr && l->addr == out.addr; }
-static int out_may_pair(uint64_t a) { return out.addr && a == out.addr && (out.pairing || (out.on && !key_for(a))); }
+/* Only while "Bluetooth speaker search" has just picked it.  Not merely because no key is there: one that a failed
+ * authentication used to delete let a device with the speaker's address pair Just Works in its place. */
+static int out_may_pair(uint64_t a) { return out.addr && a == out.addr && out.pairing; }
 
 static const char *speaker_path(void)
 {
@@ -1246,7 +1260,8 @@ static void out_inquiry_done(void)
     if (out.l && out.l->addr != cand.addr) { out_stream_reset(); out_disconnect(out.l); }
     key_forget(cand.addr);                              /* in pairing mode: whatever it had with us is gone */
     out.addr = cand.addr; out_name(cand.name); out.on = 1; atomic_store(&out_enabled, 1); btout_route(1);
-    out.pairing = 1; out.failures = 0; out.next_page = ms(); out.psrm = cand.psrm; out.clock = cand.clock;
+    out.pairing = 1; out.pair_until = ms() + OUT_PAIR_S * 1000LL;
+    out.failures = 0; out.next_page = ms(); out.psrm = cand.psrm; out.clock = cand.clock;
     fprintf(stderr, "a2dp: pairing with speaker %012llx \"%s\"\n", (unsigned long long)out.addr, cand.name);
     speaker_save();
     search_end();
@@ -1340,6 +1355,7 @@ static int out_upkeep(void)
         if (r && !out.addr && !atomic_load(&out_searching)) atomic_store(&out_search_req, 1);   /* none yet: find one */
     }
     if (atomic_exchange(&out_save_req, 0)) speaker_save();
+    if (out.pairing && now > out.pair_until) { out.pairing = 0; fprintf(stderr, "a2dp: pairing with the speaker timed out\n"); }
     if (atomic_load(&out_searching)) {
         if (now > search_until) {
             fprintf(stderr, "a2dp: no speaker found\n");
@@ -1448,7 +1464,9 @@ static void link_gone(struct link *l)
         if (f->handle == l->handle) { *p = f->next; free(f); } else p = &f->next;
     }
     ftail = &fhead; while (*ftail) ftail = &(*ftail)->next;
-    credits += l->unacked;
+    *credits += l->unacked;
+    for (int i = 0; i < npend; i++)                         /* commands for this handle: it may be another link's soon */
+        if ((pend[i].op == OP_DISCONNECT || pend[i].op == OP_ENCRYPT) && (int)u16(pend[i].p) == l->handle) pend[i].op = 0;
     memset(l, 0, sizeof *l);
 }
 
@@ -1471,11 +1489,13 @@ int a2dp_completed(unsigned handle, unsigned n)
 {
     struct link *l = link_by(handle);
     if (!l) return 0;
-    credits += n; if (credits > (int)acl_num) credits = acl_num;
+    *credits += n; if (*credits > (int)acl_num) *credits = acl_num;
     l->unacked -= n; if (l->unacked < 0) l->unacked = 0;
     acl_flush();
     return 1;
 }
+
+void a2dp_acl_flush(void) { acl_flush(); }
 
 int a2dp_event(const unsigned char *e, size_t n)
 {
@@ -1581,8 +1601,18 @@ int a2dp_event(const unsigned char *e, size_t n)
         if (qn < 3 || !(l = link_by(u16(q + 1) & 0x0fff))) return 0;
         if (q[0]) {
             fprintf(stderr, "a2dp: %012llx: authentication failed (0x%02x)\n", (unsigned long long)l->addr, q[0]);
-            if (q[0] == 0x06 || (q[0] == 0x05 && is_speaker(l))) key_forget(l->addr);   /* key missing: the device forgot us
-                                                                (BlueZ says 0x05); our speaker pairs afresh next time */
+            /* Key missing (0x06; BlueZ says 0x05): the device forgot us, or it is another one under its address.  The
+             * key stays: deleting it on the peer's word let a lookalike pair in its place.  A phone pairs again in the
+             * pairing window (its new key replaces this one), the speaker through "Bluetooth speaker search".  Within
+             * the window, where anyone may pair anyway, the key goes and we authenticate again: that pairs. */
+            if ((q[0] == 0x06 || q[0] == 0x05) && key_for(l->addr)) {
+                if (pairing && !is_speaker(l) && l->pend_until) {
+                    key_forget(l->addr); l->auth_sent = 0; l->auth_at = ms() + 100;
+                    return 1;
+                }
+                fprintf(stderr, "a2dp: %012llx has no key for us: %s\n", (unsigned long long)l->addr,
+                        is_speaker(l) ? "search for the speaker again to pair it" : "pair it again with pairing on");
+            }
             pending_resolve(l, 0);
         } else if (!l->enc) { unsigned char d[3]; put16(d, l->handle); d[2] = 1; later(OP_ENCRYPT, d, 3); }
         else pending_resolve(l, 1);
@@ -1602,7 +1632,9 @@ int a2dp_upkeep(void)
 {
     avrcp_upkeep();
     if (out_upkeep() < 0) return -1;
-    for (int i = 0; i < npend; i++) if (hci_cmd(pend[i].op, pend[i].p, pend[i].n) < 0) { npend = 0; return -1; }
+    /* hci_cmd handles events while it waits: they may queue more (npend grows, run here too) or end a link, whose
+     * commands are then voided (link_gone: op 0) rather than sent to a handle the controller may hand out again */
+    for (int i = 0; i < npend; i++) if (pend[i].op && hci_cmd(pend[i].op, pend[i].p, pend[i].n) < 0) { npend = 0; return -1; }
     npend = 0;
     int r = atomic_exchange(&pair_req, -1);
     if (r >= 0) set_pairing(r);
@@ -1652,7 +1684,7 @@ int a2dp_setup(void)
     if (acl_len < 27) acl_len = 27;
     if (acl_len > 1021) acl_len = 1021;
     if (!acl_num) acl_num = 1;
-    credits = acl_num;
+    if (!(credits = hci_acl_pool())) { credits = &own_credits; own_credits = acl_num; }    /* shared: ble.c has filled it */
     memset(b, 0, sizeof b); memcpy(b, name, nl);
     if (hci_cmd(OP_LOCAL_NAME, b, 248) < 0) return -1;
     { unsigned char cod[3] = { 0x14, 0x04, 0x24 };          /* audio + rendering; audio/video, loudspeaker */
@@ -1664,7 +1696,7 @@ int a2dp_setup(void)
     { unsigned char *u = b + 3 + nl; u[0] = 3; u[1] = 0x03; u[2] = 0x0b; u[3] = 0x11; }
     b[0] = 0;                                               /* FEC not required */
     if (hci_cmd(OP_EIR, b, 241) < 0) return -1;
-    fprintf(stderr, "a2dp: ready as \"%s\", ACL %u x %u\n", name, acl_num, acl_len);
+    fprintf(stderr, "a2dp: ready as \"%s\", ACL %u x %u%s\n", name, acl_num, acl_len, credits != &own_credits ? ", shared with LE" : "");
     return 0;
 }
 

@@ -32,7 +32,9 @@
  * legacy pairing otherwise and for devices that only know that.  AES, CMAC and the key functions are ble_crypto.c.
  * Home Assistant asks for it (pair), or the device does (Security Request), as ESP-IDF accepts those.  Bonds (the keys
  * the device gave us, its IRK to recognise it behind a private address) go to state/ble_bonds; on every later
- * connection the link is encrypted with them before GATT traffic starts.  Our own keys are never distributed: we only
+ * connection the link is encrypted with them before GATT traffic starts.  A bond is never dropped on the device's word
+ * (it may be another one under its address): only Home Assistant's pair or unpair replaces or removes it.  16-byte keys
+ * only, and the device's P-256 key must be on the curve.  Our own keys are never distributed: we only
  * ever connect, the device never needs to recognise or encrypt towards us.
  *
  * BR/EDR (the Bluetooth speaker) shares this thread and the controller: a2dp.c gets the events and ACL packets that
@@ -85,7 +87,7 @@ enum { ATT_FIND_TYPE_REQ = 0x06, ATT_FIND_TYPE_RSP };
 enum { HCI_E_UNKNOWN_CONN = 0x02, HCI_E_TIMEOUT = 0x08, HCI_E_LIMIT = 0x09, HCI_E_USER_ENDED = 0x13 };
 
 static int fd = -1, wake[2] = { -1, -1 };
-static const struct ble_handler *H;
+static const struct ble_handler *_Atomic H;     /* set again by a later ble_start (the protocol) while the thread runs */
 static atomic_int want_on, want_active, scanning;
 static atomic_llong quiet_until;                /* CLOCK_MONOTONIC ms: no scanning before then (ble_quiet) */
 static char bdaddr[18];                         /* set once, before anything reads it */
@@ -145,7 +147,9 @@ static struct conn {
     int state, handle, cancel, close_now, ltk_neg, upd; uint64_t addr; unsigned addr_type, mtu;
     int enc, enc_pending, need_enc, need_dhkey;  /* encrypted; being encrypted (GATT waits); Start Encryption / DHKey wanted */
     int heard, mtu_retry, peer_mtu;             /* the device has sent something; MTU exchange again once encrypted;
-                                                   the device exchanged MTUs itself */
+                                                   the device exchanged MTUs itself (honoured once per connection) */
+    unsigned gen;                               /* which use of the slot: cmd() may free it under upkeep() */
+    size_t sent;                                /* value bytes in the Prepare Write on the air */
     unsigned char enc_ltk[16], enc_rand[8]; unsigned enc_ediv;
     struct smp smp;
     struct timespec t;                          /* connect started / current ATT request sent */
@@ -161,7 +165,7 @@ static struct conn {
 #define SRV BLE_MAX_CONN                        /* the peripheral link's place, after the proxy's slots */
 #define NCONN (BLE_MAX_CONN + 1)
 
-static unsigned acl_len = 27, acl_num = 1; static int credits;
+static unsigned acl_len = 27, acl_num = 1; static int credits, shared_acl;     /* shared_acl: no LE buffers of its own */
 struct frag { struct frag *next; int handle; size_t len; unsigned char b[]; };
 static struct frag *fhead, **ftail = &fhead;
 
@@ -265,6 +269,7 @@ static void send_prep(struct conn *c)
 {
     unsigned char p[5 + ATT_MTU]; size_t k = c->cur->len - c->off;
     if (k > c->mtu - 5) k = c->mtu - 5;
+    c->sent = k;                                /* the answer advances by this, whatever the MTU is by then */
     p[0] = ATT_PREP_WRITE_REQ; put16(p + 1, c->cur->handle); put16(p + 3, c->off); memcpy(p + 5, c->cur->data + c->off, k);
     att_send(c, p, 5 + k);
 }
@@ -279,6 +284,7 @@ static unsigned chr_end(struct conn *c, int i)
 static void disc_next(struct conn *c)
 {
     struct ble_db *d = c->db; unsigned char p[7];
+    now(&c->t);                                 /* ATT_MS is per request: a big database takes hundreds of them */
     for (;;) {
         if (c->phase == 0) {
             p[0] = ATT_READ_GROUP_REQ; put16(p + 1, c->next); put16(p + 3, 0xffff); put16(p + 5, 0x2800);
@@ -350,7 +356,7 @@ static void start_op(struct conn *c)
     while (!c->cur && c->ops && c->state == C_UP && !c->close_now && !c->enc_pending) {
         struct op *o = c->cur = c->ops; c->ops = o->next;
         unsigned char p[3 + ATT_MTU];
-        now(&c->t); c->vlen = c->off = 0;
+        now(&c->t); c->vlen = c->off = c->sent = 0;
         switch (o->kind) {
         case K_READ: send_read(c); break;
         case K_WRITE:
@@ -381,8 +387,10 @@ static void att_rx(struct conn *c, const unsigned char *p, size_t n)
         if (p[0] == ATT_INDICATE) { r[0] = ATT_CONFIRM; att_send(c, r, 1); }
         if (n >= 3 && H->notify) H->notify(c->addr, u16(p + 1), p + 3, n - 3);
         return;
-    case ATT_MTU_REQ:                                       /* the device's side of the exchange: the smaller MTU counts */
-        if (n >= 3) { unsigned m = u16(p + 1); c->mtu = m < 23 ? 23 : m < ATT_MTU ? m : ATT_MTU; c->peer_mtu = 1; }
+    case ATT_MTU_REQ:                                       /* the device's side of the exchange: the smaller MTU counts.
+                                                               Once per connection (ATT allows no more): a second one must
+                                                               not shrink the MTU under a long write in progress */
+        if (n >= 3 && !c->peer_mtu) { unsigned m = u16(p + 1); c->mtu = m < 23 ? 23 : m < ATT_MTU ? m : ATT_MTU; c->peer_mtu = 1; }
         r[0] = ATT_MTU_RSP; put16(r + 1, ATT_MTU); att_send(c, r, 3);
         return;
     }
@@ -424,8 +432,8 @@ static void att_rx(struct conn *c, const unsigned char *p, size_t n)
         break;
     case K_WRITE:
         if (p[0] == ATT_PREP_WRITE_RSP) {
-            size_t k = o->len - c->off; if (k > c->mtu - 5) k = c->mtu - 5;
-            c->off += k; now(&c->t);
+            if (!c->sent) return;                           /* no Prepare Write of ours on the air */
+            c->off += c->sent; c->sent = 0; now(&c->t);
             if (c->off < o->len) send_prep(c);
             else { r[0] = ATT_EXEC_WRITE_REQ; r[1] = 1; att_send(c, r, 2); }
             return;
@@ -841,7 +849,9 @@ static void smp_rx(struct conn *c, const unsigned char *p, size_t n)
     struct smp *s = &c->smp; unsigned char out[65], ra[6], o[16], x[16];
     if (!n) return;
     addr_bytes(c->addr, ra);
-    if (p[0] == 0x0b) {                                     /* Security Request: accept, like ESP-IDF */
+    if (p[0] == 0x0b) {                                     /* Security Request: accept, like ESP-IDF.  It pairs only a
+                                                               device without a bond: a bonded one gets its bond, and only
+                                                               Home Assistant's "pair" replaces a bond (encrypted()) */
         struct bond *b = bond_for(c->addr, c->addr_type);
         if (s->state != S_IDLE || c->enc_pending) return;
         if (b) { if (!c->enc) encrypt_with(c, b->ltk, b->rand, b->ediv); }
@@ -856,9 +866,11 @@ static void smp_rx(struct conn *c, const unsigned char *p, size_t n)
     case S_RSP:
         if (p[0] != 0x02 || n < 7) break;
         memcpy(s->pres, p, 7);
-        s->sc = have_sc && s->preq[3] & p[3] & 0x08;
-        s->keysize = p[4] < 16 ? p[4] : 16;
-        if (s->keysize < 7) { smp_fail(c, 0x06); return; }  /* encryption key size */
+        s->sc = have_sc && s->preq[3] & p[3] & 0x08;        /* Secure Connections whenever both can */
+        if (have_sc && !s->sc) fprintf(stderr, "bluetooth: %012llx knows only legacy pairing\n", (unsigned long long)c->addr);
+        /* Full-size keys only: 7..15 octets are what KNOB-style attacks negotiate down to, and every device offers 16 */
+        s->keysize = p[4];
+        if (s->keysize != 16) { smp_fail(c, 0x06); return; }      /* encryption key size */
         { unsigned dist = s->preq[6] & p[6];                /* EncKey = LTK + EDIV/Rand (legacy only), IdKey = IRK + address */
           s->want = (!s->sc && dist & 1 ? 0x03 : 0) | (dist & 2 ? 0x0c : 0); }
         if (s->sc) { out[0] = 0x0c; memcpy(out + 1, local_pk, 64); smp_send(c, out, 65); s->state = S_PK; return; }
@@ -885,6 +897,12 @@ static void smp_rx(struct conn *c, const unsigned char *p, size_t n)
         if (p[0] != 0x0c || n < 65) break;
         memcpy(s->pkb, p + 1, 64);
         if (!memcmp(s->pkb, local_pk, 32)) { smp_fail(c, 0x08); return; }  /* our own key reflected */
+        {   /* a point off the curve leaks our private key bit by bit through the DHKey (invalid curve attack); the
+             * MediaTek chip's LE Generate DHKey is not known to check it, so we do */
+            unsigned char px[32], py[32]; bytes_reverse(px, s->pkb, 32); bytes_reverse(py, s->pkb + 32, 32);
+            if (!p256_on_curve(px, py)) { fprintf(stderr, "bluetooth: %012llx: public key not on the curve\n", (unsigned long long)c->addr);
+                                        smp_fail(c, 0x0b); return; }       /* DHKey check failed */
+        }
         s->state = S_CB;
         return;
     case S_CB:
@@ -961,9 +979,17 @@ static void encrypted(struct conn *c, int status)
         fprintf(stderr, "bluetooth: encrypting the link to %012llx failed (0x%02x)\n", (unsigned long long)c->addr, status);
         if (s->state == S_ENC) pair_done(c, 0, status);
         else {
+            /* 0x06, PIN or key missing: the device forgot us, or it is another one under its address.  The bond stays
+             * either way (one that deleted it on this answer let a lookalike pair in its place with a Security Request);
+             * Home Assistant's "pair" replaces it, as asking for that is the user's say-so. */
             struct bond *b = bond_for(c->addr, c->addr_type);
-            if (b && status == 0x06) bond_forget(b);        /* PIN or key missing: the device forgot us */
-            if (s->asked) pair_done(c, 0, status);
+            if (b && status == 0x06 && s->asked && s->state == S_IDLE && c->state != C_CLOSING) {
+                fprintf(stderr, "bluetooth: %012llx has no key for us: pairing afresh\n", (unsigned long long)c->addr);
+                smp_start(c);
+            } else {
+                if (b && status == 0x06) fprintf(stderr, "bluetooth: %012llx has no key for us: pair it again from Home Assistant\n", (unsigned long long)c->addr);
+                if (s->asked) pair_done(c, 0, status);
+            }
         }
     }
     start_op(c);
@@ -1087,6 +1113,7 @@ static void event(const unsigned char *p, size_t n)            /* p: event code,
             if ((c = by_handle(u16(q + 1 + 4 * i) & 0x0fff))) { c->unacked -= k; if (c->unacked < 0) c->unacked = 0; }
         }
         acl_flush();
+        if (shared_acl) a2dp_acl_flush();                   /* the pool is a2dp's too: its queue may go on */
         break;
     case EV_LE_META:
         if (n < 1) break;
@@ -1181,8 +1208,11 @@ static int setup(void)
         if (st > 0) fprintf(stderr, "bluetooth: command %04x refused, HCI status 0x%02x\n", cc_op, st);    /* timeouts say so in cmd() */
         return -1;
     }
+    shared_acl = 0;
     if (cmd(OP_LE_READ_BUFFER, NULL, 0) == 0 && u16(cc_ret)) { acl_len = u16(cc_ret); acl_num = cc_ret[2]; }
-    else if (cmd(OP_READ_BUFFER, NULL, 0) == 0) { acl_len = u16(cc_ret); acl_num = u16(cc_ret + 3); }    /* shared with BR/EDR */
+    else if (cmd(OP_READ_BUFFER, NULL, 0) == 0) {           /* shared with BR/EDR: one pool of credits for both (hci.h) */
+        acl_len = u16(cc_ret); acl_num = u16(cc_ret + 3); shared_acl = 1;
+    }
     if (acl_len < 27) acl_len = 27;
     if (!acl_num) acl_num = 1;
     credits = acl_num;
@@ -1232,6 +1262,7 @@ static int handle_request(struct req *r)
     case R_CONNECT:
         if (c) { if (c->state == C_UP && H->connection) H->connection(c->addr, 1, c->mtu, 0); break; }     /* already */
         if (!(c = in_state(C_FREE))) { if (H->connection) H->connection(r->addr, 0, 0, HCI_E_LIMIT); break; }
+        { static unsigned gens; c->gen = ++gens ? gens : ++gens; }     /* never 0, the value of a free slot */
         c->state = C_WAIT; c->addr = r->addr; c->addr_type = r->addr_type; now(&c->t);
         set_slot(c, r->addr);
         break;
@@ -1264,7 +1295,9 @@ static int handle_request(struct req *r)
     return 0;
 }
 
-/* Connection upkeep that needs HCI commands (never sent from inside event handling) and timeouts.  -1: controller gone. */
+/* Connection upkeep that needs HCI commands (never sent from inside event handling) and timeouts.  -1: controller gone.
+ * cmd() handles events while it waits, a Disconnection Complete among them: after each one the connection may be gone
+ * (its slot zeroed), and then nothing more is done with it. */
 static int upkeep(void)
 {
     if (a2dp_upkeep() < 0) return -1;
@@ -1274,13 +1307,15 @@ static int upkeep(void)
     } else atomic_store(&drop_srv, 0);
     if (adv_upkeep() < 0) return -1;
     for (int i = 0; i < NCONN; i++) {
-        struct conn *c = &conns[i]; unsigned char p[64];
+        struct conn *c = &conns[i]; unsigned char p[64]; unsigned gen = c->gen;
+#define GONE (c->gen != gen)
         if (c->state == C_FREE) continue;
         if (c->need_dhkey && !dh_owner && c->state >= C_MTU) {         /* one at a time: the result names no connection */
             c->need_dhkey = 0; dh_owner = c;
             swap_coords(p, c->smp.pkb);
             int st = cmd(OP_LE_DHKEY, p, 64);
             if (st < 0) return -1;
+            if (GONE) continue;
             if (st) { dh_owner = NULL; smp_fail(c, 0x08); }
         }
         /* Not straight after the connection: started before the device's first packet, the link failed (0x3e) */
@@ -1289,19 +1324,26 @@ static int upkeep(void)
             put16(p, c->handle); memcpy(p + 2, c->enc_rand, 8); put16(p + 10, c->enc_ediv); memcpy(p + 12, c->enc_ltk, 16);
             int st = cmd(OP_LE_START_ENC, p, 28);
             if (st < 0) return -1;
+            if (GONE) continue;
             if (st) encrypted(c, st);
         }
         if (c->smp.state != S_IDLE && ms_since(&c->smp.t) > SMP_MS) {
             fprintf(stderr, "bluetooth: %012llx: pairing timed out\n", (unsigned long long)c->addr);
             smp_fail(c, 0x08);
         }
-        if (c->ltk_neg) { c->ltk_neg = 0; put16(p, c->handle); if (cmd(OP_LE_LTK_NEG, p, 2) < 0) return -1; }
+        if (c->ltk_neg) {
+            c->ltk_neg = 0; put16(p, c->handle);
+            if (cmd(OP_LE_LTK_NEG, p, 2) < 0) return -1;
+            if (GONE) continue;
+        }
         if (c->upd && c->state >= C_MTU) {
             c->upd = 0; put16(p, c->handle); memcpy(p + 2, c->upd_par, 8); put16(p + 10, 0); put16(p + 12, 0);
             if (cmd(OP_LE_CONN_UPDATE, p, 14) < 0) return -1;
+            if (GONE) continue;
         }
         if (c->state == C_CONNECTING && !c->cancel && ms_since(&c->t) > CONNECT_MS) {
             c->cancel = 2; if (cmd(OP_LE_CONNECT_CANCEL, NULL, 0) < 0) return -1;
+            if (GONE) continue;
         }
         if (c->state == C_MTU && ms_since(&c->t) > 10000) {     /* no answer to the MTU exchange: default MTU */
             unsigned char e[5] = { ATT_ERROR, ATT_MTU_REQ }; att_rx(c, e, 5);
@@ -1314,12 +1356,14 @@ static int upkeep(void)
             c->close_now = 0; c->state = C_CLOSING; now(&c->t);
             put16(p, c->handle); p[2] = HCI_E_USER_ENDED;
             if (cmd(OP_DISCONNECT, p, 3) < 0) return -1;
+            if (GONE) continue;
         }
         if (c->state == C_CLOSING && ms_since(&c->t) > 5000) {    /* never confirmed: forget it */
             if (c->srv) { srv_gone(c); continue; }
             uint64_t a = c->addr; free_conn(c);
             if (H->connection) H->connection(a, 0, 0, 0);
         }
+#undef GONE
     }
     return 0;
 }
@@ -1480,6 +1524,7 @@ int hci_cmd(unsigned op, const void *par, unsigned n) { return cmd(op, par, n); 
 const unsigned char *hci_ret(void) { return cc_ret; }
 int hci_write(const void *b, size_t n) { return write(fd, b, n) == (ssize_t)n ? 0 : -1; }
 void hci_poke(void) { poke(); }
+int *hci_acl_pool(void) { return shared_acl ? &credits : NULL; }
 
 void ble_start(const struct ble_handler *h)
 {

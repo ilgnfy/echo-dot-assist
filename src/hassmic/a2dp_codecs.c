@@ -4,7 +4,8 @@
  *
  *   SBC       RTP, a byte with the frame count, whole SBC frames (sbc.c)
  *   AAC       RTP, one LATM AudioMuxElement with its configuration in band (muxConfigPresent = 1).  Sources size the
- *             bitrate so that a frame fits one packet.  Decoded by the firmware's own FFmpeg 4 (libavcodec's aac_latm),
+ *             bitrate so that a frame fits one packet.  The configuration is the radio's word: checked against what
+ *             was negotiated before FFmpeg sees it, and so is the decoded rate.  Decoded by the firmware's own FFmpeg 4 (libavcodec's aac_latm),
  *             loaded at run time: its decoder wants the LOAS framing, a 3-byte sync header we put in front.  The
  *             structures are FFmpeg 4's ABI; that the library is FFmpeg 4 is checked before AAC is offered
  *   aptX      no RTP header at all: 4-byte aptX samples back to back (libfreeaptx, src/third_party)
@@ -133,10 +134,54 @@ static int aac_check(const unsigned char *c, unsigned n)
     return one_bit(c[0]) && c[0] & 0xc0 && (f == 0x010 || f == 0x008) && ((c[2] & 15) == 0x08 || (c[2] & 15) == 0x04);
 }
 
+/* What was negotiated: the source's in-band configuration must say the same (a2dp_latm_check), and so must what the
+ * decoder puts out (aac_packet).  The player is built for 44.1 / 48 kHz stereo; FFmpeg takes any rate a frame claims. */
+static unsigned aac_rate, aac_ch; static int aac_cfg_ok, aac_said;
+
+struct bits { const unsigned char *p; size_t n, at; };
+static long bits_get(struct bits *b, unsigned k)               /* k <= 24 bits, -1 past the end */
+{
+    long v = 0;
+    if (b->at + k > 8 * b->n) return -1;
+    for (unsigned i = 0; i < k; i++, b->at++) v = v << 1 | (b->p[b->at >> 3] >> (7 - (b->at & 7)) & 1);
+    return v;
+}
+
+static long latm_value(struct bits *b)                         /* LatmGetValue: 1..4 bytes */
+{
+    long k = bits_get(b, 2), v = 0;
+    for (long i = 0; k >= 0 && i <= k && v >= 0; i++) { long x = bits_get(b, 8); v = x < 0 ? -1 : v << 8 | x; }
+    return k < 0 ? -1 : v;
+}
+
+/* One AudioMuxElement (muxConfigPresent = 1, ISO 14496-3 1.7.3): 1 = its StreamMuxConfig is AAC LC, one program and
+ * layer, at the negotiated rate with 1 or 2 channels, or it reuses such a configuration seen before (*cfg_ok); 0 =
+ * anything else, which FFmpeg 4's parser is not given.  Only the fields up to the channel configuration: the rest is
+ * FFmpeg's to read, but no rate, object type or channel layout of the source's choosing gets past here. */
+int a2dp_latm_check(const unsigned char *p, size_t n, unsigned rate, unsigned ch, int *cfg_ok)
+{
+    struct bits b = { p, n, 0 };
+    long same = bits_get(&b, 1);
+    if (same) return same > 0 && *cfg_ok;                   /* useSameStreamMux */
+    *cfg_ok = 0;
+    long version = bits_get(&b, 1), version_a = version == 1 ? bits_get(&b, 1) : 0;
+    if (version < 0 || version_a != 0) return 0;            /* audioMuxVersionA 1 is reserved */
+    if (version == 1 && latm_value(&b) < 0) return 0;       /* taraBufferFullness */
+    if (bits_get(&b, 1) < 0 || bits_get(&b, 6) < 0) return 0;     /* allStreamsSameTimeFraming, numSubFrames */
+    if (bits_get(&b, 4) != 0 || bits_get(&b, 3) != 0) return 0;   /* numProgram, numLayer: one each */
+    if (version == 1 && latm_value(&b) < 0) return 0;       /* ascLen */
+    long aot = bits_get(&b, 5), sfi = bits_get(&b, 4), chc = bits_get(&b, 4);
+    if (aot != 2) return 0;                                 /* AAC LC, what we offer (no SBR, no escape) */
+    if (sfi != (rate == 48000 ? 3 : rate == 44100 ? 4 : -2)) return 0;    /* 0xf, an explicit rate: not ours either */
+    if (chc < 1 || chc > 2 || (ch == 1 && chc != 1)) return 0;
+    return *cfg_ok = 1;
+}
+
 static int aac_open(const unsigned char *c, unsigned n)
 {
-    (void)c; (void)n;
+    (void)n;
     if (!aac_usable()) return -1;
+    aac_rate = (c[1] << 4 | c[2] >> 4) == 0x008 ? 48000 : 44100; aac_ch = (c[2] & 15) == 0x08 ? 1 : 2; aac_cfg_ok = aac_said = 0;
     if (!(ff.ctx = ff.alloc(ff.codec)) || ff.open(ff.ctx, ff.codec, NULL) < 0) { ff.free_ctx(&ff.ctx); return -1; }
     return 0;
 }
@@ -160,7 +205,12 @@ static float sample(const void *f, int fmt, unsigned ch, unsigned nch, unsigned 
 static void aac_packet(const unsigned char *p, size_t n, a2dp_pcm_fn *out)
 {
     size_t off = rtp_len(p, n), len = n - off;
-    if (!off || !ff.ctx || len > 8191 || ff.pkt_new(ff.pkt, len + 3)) return;
+    if (!off || !ff.ctx || len > 8191) return;
+    if (!a2dp_latm_check(p + off, len, aac_rate, aac_ch, &aac_cfg_ok)) {
+        if (!aac_said) { aac_said = 1; fprintf(stderr, "a2dp: AAC frame with a configuration other than negotiated: dropped\n"); }
+        return;
+    }
+    if (ff.pkt_new(ff.pkt, len + 3)) return;
     unsigned char *d = *(unsigned char **)((char *)ff.pkt + PACKET_DATA);
     d[0] = 0x56; d[1] = 0xe0 | len >> 8; d[2] = len;    /* LOAS: sync word 0x2b7, 13-bit length */
     memcpy(d + 3, p + off, len);
@@ -171,12 +221,15 @@ static void aac_packet(const unsigned char *p, size_t n, a2dp_pcm_fn *out)
         unsigned ns = *(int *)((char *)ff.frame + FRAME_SAMPLES), nch = ff.channels(ff.frame), rate = ff.rate(ff.frame);
         int fmt = *(int *)((char *)ff.frame + FRAME_FORMAT);
         unsigned och = nch > 1 ? 2 : 1;
+        /* implicit SBR (a fill element in a frame) makes FFmpeg double the rate: 88.2 / 96 kHz, which the player has
+         * no room for.  Whatever the configuration said, a frame not at the negotiated rate is not played. */
+        if (rate != aac_rate || nch < 1 || nch > 2) { ff.frame_unref(ff.frame); continue; }
         if (ns > sizeof pcm / sizeof *pcm / och) ns = sizeof pcm / sizeof *pcm / och;
         for (unsigned i = 0; i < ns; i++) for (unsigned c = 0; c < och; c++) {
             float v = sample(ff.frame, fmt, c, nch, i) * 32768.0f;
             pcm[i * och + c] = v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v;
         }
-        if (nch && rate) out(pcm, ns, och, rate);
+        out(pcm, ns, och, rate);
         ff.frame_unref(ff.frame);
     }
 }

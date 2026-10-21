@@ -22,4 +22,8 @@ struct a2dp_codec {
 
 extern const struct a2dp_codec a2dp_codecs[];      /* in order of preference; the source still picks */
 extern const int a2dp_ncodecs;
+
+/* AAC: is this LATM AudioMuxElement's configuration AAC LC at rate with up to ch channels (or one seen before)?
+ * *cfg_ok carries "a good configuration was seen" from packet to packet; 0 at the start of a stream */
+int a2dp_latm_check(const unsigned char *p, size_t n, unsigned rate, unsigned ch, int *cfg_ok);
 #endif

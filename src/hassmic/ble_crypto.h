@@ -15,6 +15,7 @@ void smp_f5(const uint8_t w[32], const uint8_t n1[16], const uint8_t n2[16], con
             uint8_t mackey[16], uint8_t ltk[16]);
 void smp_f6(const uint8_t w[16], const uint8_t n1[16], const uint8_t n2[16], const uint8_t r[16], const uint8_t io[3],
             const uint8_t a1[7], const uint8_t a2[7], uint8_t out[16]);
+int  p256_on_curve(const uint8_t x[32], const uint8_t y[32]);       /* 1: a valid P-256 point (coordinates below p) */
 
 /* Legacy pairing and private address resolution, in over-the-air order: least significant octet first */
 void smp_c1(const uint8_t k[16], const uint8_t r[16], const uint8_t preq[7], const uint8_t pres[7],

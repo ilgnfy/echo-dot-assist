@@ -137,3 +137,60 @@ int smp_ah_match(const uint8_t irk[16], const uint8_t addr[6])
     e_le(irk, r, h);
     return h[0] == addr[0] && h[1] == addr[1] && h[2] == addr[2];
 }
+
+/* ---------------------------------------------------------------- P-256 public key check
+ * y^2 = x^3 - 3x + b (mod p) on 8 32-bit limbs, least significant first.  Multiplication by double-and-add: three of
+ * them per key, a few hundred microseconds on the Echo, so no Montgomery form. */
+typedef uint32_t fe[8];
+static const fe P256_P = { 0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0, 1, 0xffffffff };
+static const fe P256_B = { 0x27d2604b, 0x3bce3c3e, 0xcc53b0f6, 0x651d06b0, 0x769886bc, 0xb3ebbd55, 0xaa3a93e7, 0x5ac635d8 };
+
+static int fe_ge_p(const fe a)                                  /* a >= p */
+{
+    for (int i = 7; i >= 0; i--) if (a[i] != P256_P[i]) return a[i] > P256_P[i];
+    return 1;
+}
+
+static void fe_sub_p(fe r)                                      /* r -= p, wrapping */
+{
+    uint64_t borrow = 0;
+    for (int i = 0; i < 8; i++) { uint64_t d = (uint64_t)r[i] - P256_P[i] - borrow; r[i] = (uint32_t)d; borrow = d >> 63; }
+}
+
+static void fe_add(fe r, const fe a, const fe b)               /* a, b < p */
+{
+    uint64_t carry = 0;
+    for (int i = 0; i < 8; i++) { carry += (uint64_t)a[i] + b[i]; r[i] = (uint32_t)carry; carry >>= 32; }
+    if (carry || fe_ge_p(r)) fe_sub_p(r);
+}
+
+static void fe_sub(fe r, const fe a, const fe b)               /* a, b < p */
+{
+    uint64_t borrow = 0;
+    for (int i = 0; i < 8; i++) { uint64_t d = (uint64_t)a[i] - b[i] - borrow; r[i] = (uint32_t)d; borrow = d >> 63; }
+    if (borrow) { uint64_t carry = 0; for (int i = 0; i < 8; i++) { carry += (uint64_t)r[i] + P256_P[i]; r[i] = (uint32_t)carry; carry >>= 32; } }
+}
+
+static void fe_mul(fe r, const fe a, const fe b)               /* a, b < p */
+{
+    fe t = { 0 };
+    for (int i = 255; i >= 0; i--) {
+        fe_add(t, t, t);
+        if (b[i / 32] >> (i % 32) & 1) fe_add(t, t, a);
+    }
+    memcpy(r, t, sizeof t);
+}
+
+static void fe_from(fe r, const uint8_t be[32]) { for (int i = 0; i < 8; i++) r[i] = (uint32_t)be[31 - 4 * i] | (uint32_t)be[30 - 4 * i] << 8 | (uint32_t)be[29 - 4 * i] << 16 | (uint32_t)be[28 - 4 * i] << 24; }
+
+int p256_on_curve(const uint8_t x[32], const uint8_t y[32])
+{
+    fe X, Y, l, r, t;
+    fe_from(X, x); fe_from(Y, y);
+    if (fe_ge_p(X) || fe_ge_p(Y)) return 0;
+    fe_mul(l, Y, Y);
+    fe_mul(r, X, X); fe_mul(r, r, X);                           /* x^3 */
+    fe_add(t, X, X); fe_add(t, t, X); fe_sub(r, r, t);          /* - 3x */
+    fe_add(r, r, P256_B);
+    return !memcmp(l, r, sizeof l);                             /* (0, 0) and the like are not on it: b != 0 */
+}

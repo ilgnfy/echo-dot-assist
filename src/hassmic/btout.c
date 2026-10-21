@@ -347,7 +347,7 @@ void btout_ready(uint64_t addr, const char *name, int bp, unsigned mtu)
 {
     pthread_mutex_lock(&m);
     ready = 1; streaming = 0; start_failed = 0; ready_addr = addr; snprintf(ready_name, sizeof ready_name, "%s", name);
-    bitpool = bp; per_packet = (mtu - 13) / sbc_enc_len(bp);
+    bitpool = bp; per_packet = mtu > 13 ? (mtu - 13) / sbc_enc_len(bp) : 0;     /* the speaker's MTU: unsigned, its word */
     if (per_packet < 1) per_packet = 1;
     if (per_packet > 15) per_packet = 15;               /* the SBC header's frame count has 4 bits */
     cfg_gen++; qn = 0;

@@ -56,6 +56,21 @@ int main(void)
     addr[0] ^= 1;
     if (smp_ah_match(irk, addr)) { printf("FAIL ah: wrong address resolved\n"); bad = 1; }
 
-    if (!bad) printf("AES, CMAC and SMP f4/f5/f6/c1/s1/ah vectors ok\n");
+    /* P-256: the generator, the spec's debug public key (Vol 3 Part H 2.3.5.6.1); off the curve, out of range, (0, 0) */
+    uint8_t px[32], py[32];
+    unhex("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", px);
+    unhex("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", py);
+    if (!p256_on_curve(px, py)) { printf("FAIL p256: generator not on the curve\n"); bad = 1; }
+    py[31] ^= 1;
+    if (p256_on_curve(px, py)) { printf("FAIL p256: changed y on the curve\n"); bad = 1; }
+    unhex("20b003d2f297be2c5e2c83a7e9f9a5b9eff49111acf4fddbcc0301480e359de6", px);
+    unhex("dc809c49652aeb6d63329abf5a52155c766345c28fed3024741c8ed01589d28b", py);
+    if (!p256_on_curve(px, py)) { printf("FAIL p256: debug key not on the curve\n"); bad = 1; }
+    memset(px, 0, 32); memset(py, 0, 32);
+    if (p256_on_curve(px, py)) { printf("FAIL p256: (0, 0) on the curve\n"); bad = 1; }
+    memset(px, 0xff, 32);
+    if (p256_on_curve(px, py)) { printf("FAIL p256: x >= p accepted\n"); bad = 1; }
+
+    if (!bad) printf("AES, CMAC and SMP f4/f5/f6/c1/s1/ah vectors, P-256 point check ok\n");
     return bad;
 }
