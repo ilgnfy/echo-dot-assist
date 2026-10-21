@@ -1,0 +1,6 @@
+# pass 4, group 5c-audio-wake-hal (5 files): checked 2026-10-21: named by no file, mapped by no process
+file /system/lib/libace_device_info.so
+file /system/lib/libacehal_button_mod.so
+file /system/lib/libamz_nb_audio_flt.so
+file /system/lib/libtvm_modelops_ww_v5_cnet.so
+file /system/lib/libtvm_modelops_ww_v6_50target_cnet.so

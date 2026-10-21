@@ -1,0 +1,9 @@
+# pass 4, group 5a-ota-metrics-cli (8 files): checked 2026-10-21: named by no file, mapped by no process
+file /system/lib/libace_button_manager_v2_cli.so
+file /system/lib/libace_kv_storage_cli.so
+file /system/lib/libace_ota.so
+file /system/lib/libace_protometric_button.so
+file /system/lib/libace_protometric_network.so
+file /system/lib/libace_protometric_power.so
+file /system/lib/libacehal_ota.so
+file /system/lib/libnative_dev_ota_default.so

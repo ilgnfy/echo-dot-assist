@@ -1,0 +1,6 @@
+# pass 4, group 5b-network (5 files): checked 2026-10-21: named by no file, mapped by no process
+file /system/lib/libace_wifi.so
+file /system/lib/libacehal_network_process.so
+file /system/lib/libandroid_net.so
+file /system/lib/libffs_cwifi_prov_sdk.so
+file /system/lib/libneatipc_aipc.so
