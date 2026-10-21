@@ -48,7 +48,7 @@ Measured on a Dot 3 running hassmic 2026.10.06, cold boots, Home Assistant conne
 | Amazon services running that are cloud-facing | 16 that the live tests stopped one by one: `commsd`, `inloc_service`, `ace_blemesh_service`, `amakit_server`, `halo-*` (3), `tokend`, `dha_service`, `acedropboxd`, `ace_coex_metric`, `neo-*` (2), `perf*` (3) | **0** |
 | processes with the permission to open an internet socket | not counted | 5 in group `inet` (`hassmic`, `adbd` (gated), `dhcpcd`, `wpa_supplicant`, `netmgrd`) and the root-owned `avahi-daemon` and `kisd` (no sockets) |
 | firewall: packets reaching the final DROP | 0 | 0 |
-| `/system` used | 235 268 kB | 139 040 kB with the pass-4 to pass-8 files still in the quarantine (a move frees nothing; `purge` does), 138 756 kB after passes 1-3 were purged |
+| `/system` used | 235 268 kB | **87 652 kB** (-147.6 MB, 63 %), everything purged (934 files, 51 MB, in the last purge); 912 MB free |
 | `MemAvailable` | 357 MB | 385-388 MB |
 | load average | about 7 | about 4-5 |
 | files removed | | 67 executables and scripts, about 230 libraries, 3 apps, about 40 init files, and 60 lines of start-up text (`start`/`stop`/`import` lines, data folders, one migration script call) |
@@ -349,6 +349,6 @@ Wi-Fi, only USB is left, so solder the USB wires before experimenting.
 
 - The seven ACE/MediaTek daemons above were identified from their libraries, who maps their client libraries and their logs (2026-10-21), not removed one by one.
   `ace_sensorsd` had no client and was removed and tested; `ace_thermald` and `kisd` have no client either but protect the hardware and the keys.
-- A dead-man switch is not built yet: after `apply`, a flag that makes `main.sh` put the quarantine back and reboot when the Echo has no IP address after a few minutes (cleared by `verify`).  Until then the USB wires are the safety net.
+- Decided against a dead-man switch for now (the USB wires are the safety net); idea: after `apply`, a flag that makes `main.sh` put the quarantine back and reboot when the Echo has no IP address after a few minutes (cleared by `verify`).  Until then the USB wires are the safety net.
 - `light blue flashes until Home Assistant is connected` and AirPlay 2 are in PLAN.md.
 - A tidy-up of hassmic's own dead code for what is gone (`davs.c`, `dha.c`, the `alexa-*` scripts) has not been done.

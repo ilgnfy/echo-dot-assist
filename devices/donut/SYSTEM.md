@@ -7,7 +7,7 @@ this page explains the groups and the services behind them.  How and why the res
 | | |
 |---|---|
 | entries under `/system` | 1452 (1291 files and 161 symbolic links), 79 MB of file content |
-| `/system` used (df) | about 139 MB, of which the quarantine `/system/.debloat` holds the rest until `scripts/debloat.sh purge` (stock: 235 MB) |
+| `/system` used (df) | 87 652 kB after the final `purge` (stock: 235 268 kB); 912 MB free |
 | need | 1291 **required** (a running service, a file such a service loads, or something hassmic, init or our scripts use), 54 **by-name** (not loaded now, but a live file names it: kept until shown otherwise), 107 **platform** (local Android / MediaTek tools and data; no Amazon cloud code) |
 | network | listening: hassmic (TCP 26053, 28928, 28929, UDP 28930), avahi (mDNS 5353), dhcpcd (68), adbd while opened; connected: Home Assistant.  Nothing talks to the internet |
 
