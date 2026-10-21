@@ -87,6 +87,7 @@ make unit                                         # C unit tests; microWakeWord 
 .venv/bin/python tests/fake_ha.py [--qemu]        # Wyoming (wyoming)
 .venv/bin/python tests/fake_ma_sendspin.py        # Sendspin, as Music Assistant (aiosendspin)
 tests/ota_push_test.sh                            # signed push-update path end to end
+tests/boot_test.sh                                # root side: main.sh ota_watch, start counter, config check (mksh if there)
 tests/otatool_test.sh                             # the PC's otatool (Python) against the Echo's (C)
 .venv/bin/python tests/fake_ha_wakesound.py       # wake sound removal off and on, against the PC's stand-in echo
 .venv/bin/python tests/fake_ha_volumes.py         # separate volumes: four of their own or following the music, media, keys,

@@ -74,6 +74,7 @@ aioesphomeapi, wyoming, aiosendspin, noiseprotocol, aiohttp):
 .venv/bin/python tests/fake_improv.py         # setup from a phone: Improv over BLE against a fake controller on a pty
                                              # (HASSMIC_BT_DEV), root's wifi.sh, adoption, factory reset (HA, button hold)
 tests/ota_push_test.sh                        # signed push-update path end to end
+tests/boot_test.sh                            # main.sh itself: which bundles root installs, start counter, bad config
 tests/otatool_test.sh                         # scripts/otatool.py against the C otatool: same keys, signatures, bundles
 ```
 

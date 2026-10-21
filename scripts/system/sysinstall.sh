@@ -48,6 +48,10 @@ elif [ "$MODE" != uninstall ]; then
         [ -s "$SRC/$f" ] || { say "$f missing in $SRC, nothing written"; exit 1; }
     done
     for f in "$SRC"/*.sh; do sh -n "$f" || { say "${f##*/} does not parse, nothing written"; exit 1; }; done
+    # A CR parses (it becomes part of each word) and breaks every path: copied from a Windows checkout without .gitattributes
+    for f in "$SRC"/*.sh "$SRC/device.conf" "$SRC/hassmic.rc"; do
+        ! grep -q "$(printf '\r')" "$f" || { say "${f##*/} has CR LF line endings, nothing written"; exit 1; }
+    done
     prod=$(. "$SRC/device.conf" 2>/dev/null && echo "$PRODUCT")
     [ "$prod" = "$(getprop ro.product.device)" ] ||
         { say "built for ${prod:-an unknown model}, this Echo is $(getprop ro.product.device); nothing written"; exit 1; }

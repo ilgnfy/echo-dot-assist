@@ -25,7 +25,7 @@ if [ -f $OTA/current/main.sh ]; then
         [ "$1" = satellite ] && echo "$at == update $(cat $OTA/current/VERSION 2>/dev/null) failed to start $tries times: running the factory copy" >> $BASE/boot.log
     else
         D=$OTA/current
-        [ "$1" = satellite ] && echo $((tries + 1)) > $OTA/tries       # main.sh resets it once hassmic has run for a minute
+        [ "$1" = satellite ] && echo $((tries + 1)) > $OTA/tries       # main.sh resets it once hassmic passed its self test
     fi
 fi
 export HASSMIC_DIR=$D HASSMIC_SYS=$SYS

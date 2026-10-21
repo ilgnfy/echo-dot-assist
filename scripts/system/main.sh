@@ -15,9 +15,10 @@
 umask 022                                   # init gives us 077; what we create must be readable by the daemon's user
 D=${HASSMIC_DIR:-/system/hassmic}
 SYS=${HASSMIC_SYS:-/system/hassmic}
-OTA=/data/local/hassmic/ota
-CONF=/data/local/hassmic/hassmic.conf
-LOG=/data/local/hassmic/boot.log
+BASE=${HASSMIC_BASE:-/data/local/hassmic}      # only tests/boot_test.sh sets it
+OTA=$BASE/ota
+CONF=$BASE/hassmic.conf
+LOG=$BASE/boot.log
 # Every line of the log starts with when it was written (src/hassmic/clock.c says why): UTC once the clock was set from
 # Home Assistant since boot (property hassmic.clock.synced, set below), else seconds since boot.  hassmic stamps its own
 # lines; say for single lines from here, stamped for what a long-running piece writes.  Not for what goes on a pipe
@@ -43,16 +44,39 @@ svc_stop() {
     done
 }
 [ -f $CONF ] || exit 0
-# Without the model's facts the satellite cannot start, but the firewall needs none of them: it must go up regardless.
-if [ ! -f $D/device.conf ]; then
-    say "== $D/device.conf missing: no satellite" >> $LOG
-    [ "$1" = firewall ] && sh $D/lockdown.sh watch 2>&1 | stamped >> $LOG
-    exit 1
+# A push update runs "firewall" again (exec, same PID) while the previous firewall watcher is still looping: stop it first,
+# or every update adds one and old and new rules take turns.  Matched by command line, which also catches the ones that
+# earlier versions left behind.  Read with the shell itself: a process that exits between the open and the read leaves
+# the Echo 2's tr (Fire OS 6572) spinning on the read error for ever, and this script never got to the firewall watcher
+# and the installer below (seen 2026-09-30 right after a boot: no egress lock, push updates unanswered).
+if [ "$1" = firewall ]; then
+    for p in /proc/[0-9]*; do
+        c=; while IFS= read -r -d '' a; do c="$c $a"; done 2>/dev/null < $p/cmdline
+        case "$c" in *lockdown.sh*watch*) kill ${p#/proc/} 2>/dev/null;; esac
+    done
 fi
+
+# Without the model's facts or a config that loads the satellite cannot start, but the firewall needs neither: it must go
+# up regardless.  A config that does not load is not the update's fault: that start does not count against it (boot.sh).
+no_satellite() {
+    say "== $1: no satellite" >> $LOG
+    [ "$MAIN_MODE" = firewall ] && { sh $D/lockdown.sh watch 2>&1 | stamped >> $LOG; exit 1; }
+    [ "$2" = conf ] && echo 0 > $OTA/tries
+    exit 1
+}
+MAIN_MODE=$1
+[ -f $D/device.conf ] || no_satellite "$D/device.conf missing"
 . $D/device.conf
 # Root runs what this file says, and ADB_WIFI in it opens a root shell: nobody else may write it.  "adb push" leaves it
 # writable for everyone (seen on two of three Echos), and hassmic faces the network.
 chown root:root $CONF; chmod 644 $CONF
+# The config is edited by hand, and pushed from Windows it comes with CR LF: mksh keeps the CR in every value.  An `exit`
+# in it would end this script while sourcing it, firewall service included, so it is tried in a subshell first; a stray
+# quote mksh reports and then goes on past (tests/boot_test.sh), with whatever half of the file it got, so -n for that.
+if grep -q "$(printf '\r')" $CONF; then
+    tr -d '\r' < $CONF > $CONF.tmp && chmod 644 $CONF.tmp && mv $CONF.tmp $CONF && say "== $CONF had CR LF line endings, converted" >> $LOG
+fi
+sh -n $CONF 2> /dev/null && [ "$(. $CONF > /dev/null 2>&1; echo ok)" = ok ] || no_satellite "$CONF does not load (shell syntax)" conf
 . $CONF
 
 # uxeventd plays the "ready for setup" voice prompts and the orange setup spinner on an unregistered device.  hassmic drives
@@ -104,10 +128,10 @@ fwcheck() {
 kmod() {
     [ -n "$KMOD" ] && [ -f $D/$KMOD ] || return 0
     grep -q "^${KMOD%.ko} " /proc/modules && return 0
-    if [ -f /data/local/hassmic/state/config ]; then
-        grep -qx 'wifi_motion=on' /data/local/hassmic/state/config || return 0
+    if [ -f $BASE/state/config ]; then
+        grep -qx 'wifi_motion=on' $BASE/state/config || return 0
     else
-        set -- $(cat /data/local/hassmic/state/settings 2>/dev/null)
+        set -- $(cat $BASE/state/settings 2>/dev/null)
         [ "${13}" = 1 ] || return 0
     fi
     if out=$(insmod $D/$KMOD $KMOD_ARGS 2>&1); then echo "kmod: $KMOD loaded (Wi-Fi motion switched on)"
@@ -120,8 +144,8 @@ kmod() {
 # Home Assistant's keyed link; here only a time from 2026 on counts, and only a fresh one (a file from before a reboot
 # speaks of another boot's clock).  mksh's numbers end at 2^31 on these Echos (2038 for the time, 248 days of uptime
 # in centiseconds): so seconds and centiseconds apart, and nothing larger is formed.
-CLOCK=/data/local/hassmic/state/clock
-WIFI=/data/local/hassmic/wifi                   # scripts/device/wifi.sh's answers and lock
+CLOCK=$BASE/state/clock
+WIFI=$BASE/wifi                   # scripts/device/wifi.sh's answers and lock
 clock_set() {
     [ -f $CLOCK ] && [ ! -L $CLOCK ] || return 0
     local t= at= up now was d a first ds
@@ -151,8 +175,8 @@ clock_set() {
 # state/ is the daemon's: the file is moved out into root's directory first, so what is read is what was checked (no
 # link, no FIFO that would hold this loop) and a newer one hassmic writes meanwhile is not deleted with it.  The binder
 # calls are bounded: a stuck system_server must not stop the firewall check that runs after this.
-TZFILE=/data/local/hassmic/state/timezone
-TZTAKE=/data/local/hassmic/timezone.take
+TZFILE=$BASE/state/timezone
+TZTAKE=$BASE/timezone.take
 tz_set() {
     [ -e $TZFILE ] || [ -L $TZFILE ] || return 0
     rm -rf $TZTAKE; mv -f $TZFILE $TZTAKE 2>/dev/null || return 0      # rm -rf: a directory too, links not followed
@@ -195,13 +219,13 @@ tz_set() {
 # the Echo is set up).  The old daemon says goodbye to its records when it ends, and has to be gone before the new one
 # starts: two at once see each other's host name and the new one renames itself.  The new one announces a few seconds
 # after the goodbye, so Home Assistant sees the service go and come back and looks at where it is now.
-AVAHI_SVC=/data/misc/avahi/services/hassmic.service
+AVAHI_SVC=${HASSMIC_AVAHI:-/data/misc/avahi}/services/hassmic.service
 avahi_start() {
     local conf=/system/etc/avahi-daemon.conf node i=0
     node=$(sed -n 's|^ *<name>\([a-z0-9-]*\)</name>$|\1|p' $AVAHI_SVC 2>/dev/null)
     if [ -n "$node" ]; then
-        { echo "[server]"; echo "host-name=$node"; grep -v '^\[server\]' $conf; } > /data/misc/avahi/avahi-daemon.conf
-        conf=/data/misc/avahi/avahi-daemon.conf
+        { echo "[server]"; echo "host-name=$node"; grep -v '^\[server\]' $conf; } > ${AVAHI_SVC%/services/*}/avahi-daemon.conf
+        conf=${AVAHI_SVC%/services/*}/avahi-daemon.conf
     fi
     stop avahi-daemon; pkill avahi-daemon
     while [ $i -lt 5 ] && pidof avahi-daemon > /dev/null; do sleep 1; i=$((i + 1)); done
@@ -219,9 +243,9 @@ netwatch() {
         clock_set
         tz_set
         fwcheck
-        if [ -f /data/local/hassmic/state/mdns ] && [ ! -L /data/local/hassmic/state/mdns ]; then
-            why=$(dd if=/data/local/hassmic/state/mdns bs=60 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
-            rm -f /data/local/hassmic/state/mdns
+        if [ -f $BASE/state/mdns ] && [ ! -L $BASE/state/mdns ]; then
+            why=$(dd if=$BASE/state/mdns bs=60 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
+            rm -f $BASE/state/mdns
             [ -f $AVAHI_SVC ] && { echo "mDNS: announcing again (${why:-asked for}), avahi restarted"; avahi_start; }
         fi
         if a=$(ifconfig $WLAN 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'); [ -n "$a" ]; then
@@ -247,38 +271,58 @@ netwatch() {
 # model (its device.conf names the product this Echo reports).  This runs in the firewall service so that it can restart
 # the satellite service.
 # One key counts: the owner's (update.pub, written by install-system.sh).  Nothing is fetched from the internet.
-rejected() { say "== update rejected: $1"; rm -rf $new; echo "FAILED $1" > $IN/result.tmp; }
+rejected() { say "== update rejected: $1"; rm -rf $new; echo "FAILED $1" > $RES; }
+# What boot.sh and init will run from the bundle must parse as it is: a CR (packed from a Windows checkout) becomes part
+# of every value, `D=/system/hassmic\r` and nothing after boot starts, the egress lock included.
+broken_scripts() {
+    for f in $1/*.sh $1/device.conf $1/hassmic.rc; do
+        [ -f "$f" ] || continue
+        if grep -q "$(printf '\r')" "$f"; then echo "${f##*/} has CR LF line endings"; return; fi
+        case "$f" in *.sh) sh -n "$f" 2> /dev/null || { echo "${f##*/} does not parse"; return; };; esac
+    done
+    return 1
+}
+# The hassmic that runs is the installed update's own binary: not the factory copy after a fall back, not a test binary
+# from deploy.sh in /data.
+runs_current() {
+    for p in $(pidof hassmic); do [ "$(readlink /proc/$p/exe)" = "$1/hassmic" ] && return 0; done
+    return 1
+}
 # The installed update passed its self test (hassmic left state/ota/healthy: started, wake word engine loaded, a second
 # of microphone audio; main.c): it becomes the factory copy on the system partition, bootstrap included, so the Echo
-# falls back to the last version that worked.  Only if it is the update installed now and the hassmic running is its
-# binary: not after a fall back to the factory copy, not with a test binary from deploy.sh in /data.
+# falls back to the last version that worked.  Only if it is the update installed now and runs_current.
 factory() {
     want=$1 cur=$(readlink $OTA/current)
     have=$(cat $cur/VERSION 2>/dev/null)
-    running=
-    for p in $(pidof hassmic); do [ "$(readlink /proc/$p/exe)" = "$cur/hassmic" ] && running=1; done
     if [ -z "$cur" ] || [ "$have" != "$want" ]; then echo "FAILED $want is not the installed update (that is ${have:-none}); nothing written"
-    elif [ -z "$running" ]; then echo "FAILED $want is installed but not what runs now (fell back to the factory copy?); nothing written"
+    elif ! runs_current $cur; then echo "FAILED $want is installed but not what runs now (fell back to the factory copy?); nothing written"
     elif cmp -s $cur/VERSION $SYS/VERSION; then echo "OK $want is the factory copy already"
     elif out=$(sh $cur/sysinstall.sh factory $cur 2>&1); then echo "$out" | stamped >&2; echo "OK $want is now the factory copy"
     else echo "$out" | stamped >&2; echo "FAILED $(echo "$out" | tail -1)"
     fi
 }
+# state/ota/ is the daemon's: whatever root writes there goes through a name the daemon may have made a link to another
+# file (result.tmp -> /data/local/hassmic/hassmic, and root would create and chown that for it, then run it).  So the
+# result is written in root's own directory and renamed into place; a rename replaces a link, it does not follow it.
+RES=$OTA/result.tmp
 ota_watch() {
-    IN=/data/local/hassmic/state/ota
+    IN=$BASE/state/ota
     while sleep 2; do
         if [ -f $IN/healthy ]; then
             rm -f $IN/healthy
             cur=$(readlink $OTA/current)
+            # Only a self test that passed counts as the update coming up: a hassmic that merely runs may hang, and the
+            # factory copy running after a fall back must not wipe the count that caused it.
+            [ -n "$cur" ] && runs_current $cur && echo 0 > $OTA/tries
             # every start says so; only an update that is not the factory copy yet has anything to do
             if [ -n "$cur" ] && [ -f $cur/VERSION ] && ! cmp -s $cur/VERSION $SYS/VERSION; then
                 say "== factory copy: $(factory "$(cat $cur/VERSION)")"       # its stderr: the log
             fi
         fi
         # artifacts another Echo's page copied here (src/hassmic/artifacts.c): into the models folders, which are root's
-        if [ -f /data/local/hassmic/state/artifacts/request ]; then
+        if [ -f $BASE/state/artifacts/request ]; then
             if out=$(DAEMON_USER=$DAEMON_USER READ_AS="$D/runas $DAEMON_USER $DAEMON_GROUPS" \
-                     sh $D/artifact-install.sh /data/local/hassmic/state /data/local/hassmic 2>&1); then
+                     sh $D/artifact-install.sh $BASE/state $BASE 2>&1); then
                 say "== artifacts installed, restarting hassmic: $(echo $out)"
                 svc_restart hassmic
             else say "== artifacts not installed: $(echo $out)"
@@ -290,27 +334,27 @@ ota_watch() {
         # The request is taken into root's own folder first (a rename: a link moves as a link) and only looked at and
         # read there, where the daemon's user cannot swap it for a link or a FIFO between the look and the read
         rm -f $LEDNEW.req
-        if mv /data/local/hassmic/state/leds-request $LEDNEW.req 2>/dev/null && [ -f $LEDNEW.req ] && [ ! -L $LEDNEW.req ]; then
+        if mv $BASE/state/leds-request $LEDNEW.req 2>/dev/null && [ -f $LEDNEW.req ] && [ ! -L $LEDNEW.req ]; then
             id=$(dd if=$LEDNEW.req bs=16 count=1 2>/dev/null | tr -cd 0-9)
             rm -f $LEDNEW.req
             leds > $LEDNEW.out 2>&1; stamped < $LEDNEW.out; rm -f $LEDNEW.out
             if [ $LEDS = ok ]; then sleep 2; sh $D/alexa-off.sh > /dev/null 2>&1; fi
-            echo "$id $LEDS $LEDWHY" > /data/local/hassmic/leds.result.new && mv /data/local/hassmic/leds.result.new /data/local/hassmic/leds.result
-            chmod 644 /data/local/hassmic/leds.result
+            echo "$id $LEDS $LEDWHY" > $BASE/leds.result.new && mv $BASE/leds.result.new $BASE/leds.result
+            chmod 644 $BASE/leds.result
             say "== light ring designs: $LEDS${LEDWHY:+ ($LEDWHY)}"
         fi
         rm -f $LEDNEW.req
         # Wi-Fi from the settings page (src/hassmic/wifi.c): a scan, or a switch to another network, which takes up to two
         # minutes; so in the background, one at a time (wifi.sh's lock), and a request waits while one runs
-        if [ -f /data/local/hassmic/state/wifi-request ] && [ ! -d $WIFI/lock ] && [ -f $D/wifi.sh ]; then
+        if [ -f $BASE/state/wifi-request ] && [ ! -d $WIFI/lock ] && [ -f $D/wifi.sh ]; then
             sh $D/wifi.sh take 2>&1 | stamped &           # takes the lock first thing, long before the next look
         fi
         # Factory reset (main.c core_reset: the action button held 10 s, Home Assistant's button, the settings page):
         # everything of hassmic's goes (state/: settings, names, Home Assistant's key, approved browsers, Bluetooth
         # bonds, Sendspin, microWakeWord models) and every saved Wi-Fi network; the installed system, Amazon's models in
         # models/ aed/ and hassmic.conf stay.  The satellite starts again from scratch: the setup (OOBE).
-        if [ -f /data/local/hassmic/state/reset ] && [ ! -L /data/local/hassmic/state/reset ]; then
-            why=$(dd if=/data/local/hassmic/state/reset bs=40 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
+        if [ -f $BASE/state/reset ] && [ ! -L $BASE/state/reset ]; then
+            why=$(dd if=$BASE/state/reset bs=40 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
             # Emptying state/ under a running hassmic would leave it writing into the empty one: if it does not go, the
             # request stays for the next look, and the rest of this loop (a reboot, an update) still gets its turn.
             if ! svc_stop hassmic; then
@@ -321,7 +365,7 @@ ota_watch() {
                 say "== factory reset (${why:-asked for}): forgetting settings and Wi-Fi networks"
                 while [ -d $WIFI/lock ] && [ -n "$(cat $WIFI/lock/pid 2>/dev/null)" ] && kill -0 "$(cat $WIFI/lock/pid)" 2>/dev/null; do sleep 1; done   # a switch running ends first
                 [ -f $D/wifi.sh ] && sh $D/wifi.sh forget 2>&1 | stamped
-                st=/data/local/hassmic/state
+                st=$BASE/state
                 for f in $st/* $st/.[!.]*; do [ -e "$f" ] || [ -L "$f" ] && rm -rf "$f"; done
                 rm -f /data/misc/avahi/services/hassmic.service
                 start hassmic
@@ -333,31 +377,33 @@ ota_watch() {
         # A reboot (main.c core_reboot: the settings page, Home Assistant's restart button): what a power cycle does, for
         # an Echo that is stuck where nothing less helps (issue #17).  The request goes first, and if it cannot go there
         # is no reboot: one left behind would reboot every boot (the firewall start drops one from before it, too).
-        if [ -f /data/local/hassmic/state/reboot ] && [ ! -L /data/local/hassmic/state/reboot ]; then
-            why=$(dd if=/data/local/hassmic/state/reboot bs=40 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
-            rm -f /data/local/hassmic/state/reboot
-            if [ -e /data/local/hassmic/state/reboot ]; then say "== reboot asked for, but its request cannot be removed: not rebooting"
+        if [ -f $BASE/state/reboot ] && [ ! -L $BASE/state/reboot ]; then
+            why=$(dd if=$BASE/state/reboot bs=40 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
+            rm -f $BASE/state/reboot
+            if [ -e $BASE/state/reboot ]; then say "== reboot asked for, but its request cannot be removed: not rebooting"
             else say "== reboot (${why:-asked for})"; sync; setprop sys.powerctl reboot; sleep 30; fi
         fi
         # asked for on the settings page: a rename (main.c core_rename; the name is in what the satellite builds at start,
         # mDNS and avahi's host name included) or the wake word moving to or from Home Assistant (core_wake_engine)
-        if [ -f /data/local/hassmic/state/restart ]; then
-            why=$(dd if=/data/local/hassmic/state/restart bs=40 count=1 2>/dev/null | tr -cd 'a-z ')
-            rm -f /data/local/hassmic/state/restart
+        if [ -f $BASE/state/restart ]; then
+            why=$(dd if=$BASE/state/restart bs=40 count=1 2>/dev/null | tr -cd 'a-z ')
+            rm -f $BASE/state/restart
             say "== ${why:-restart} asked for on the settings page, restarting hassmic"
             svc_restart hassmic
         fi
         [ -f $IN/request ] || continue
-        rm -f $IN/request $IN/result
+        rm -f $IN/request $IN/result $RES
         new=$OTA/v$(cut -d. -f1 /proc/uptime)-$$
         key=
         for k in $SYS/update.pub; do
             [ -s $k ] && $SYS/otatool verify $k $IN/bundle $IN/bundle.sig > /dev/null 2>&1 && { key=$k; break; }
         done
-        if [ ! -f $SYS/update.pub ]; then echo "FAILED no update key on this device (install-system.sh puts it there)" > $IN/result.tmp
+        if [ ! -f $SYS/update.pub ]; then echo "FAILED no update key on this device (install-system.sh puts it there)" > $RES
         elif [ -z "$key" ]; then rejected "the signature does not verify against this Echo's update key"
         elif ! ver=$($SYS/otatool install $key $IN/bundle $IN/bundle.sig $new 2>&1); then
             rejected "$(echo "$ver" | tail -1)"
+        elif why=$(broken_scripts $new); then
+            rejected "version $ver: $why; not installed"
         elif prod=$(. $new/device.conf 2>/dev/null && echo "$PRODUCT"); [ "$prod" != "$(getprop ro.product.device)" ]; then
             rejected "version $ver is built for ${prod:-an unknown model}, this Echo is $(getprop ro.product.device); not installed"
         elif ! { chmod 755 $new && [ -f $new/main.sh ] && $new/runas $DAEMON_USER shell $new/hassmic -T > /dev/null 2>&1; }; then  # the daemon's user can really run it
@@ -371,16 +417,22 @@ ota_watch() {
             ln -sfn $new $OTA/current                   # toybox: replaces the link itself (checked on the device); no mv -T there
             echo 0 > $OTA/tries
             for d in $OTA/v*; do [ "$d" = "$new" ] || [ "$d" = "$old" ] || rm -rf "$d"; done        # keep the previous one
+            # A test binary from deploy.sh would go on running instead, and the update never become the factory copy.
+            [ -f $BASE/hassmic ] && rm -f $BASE/hassmic && say "== test binary $BASE/hassmic removed: the update runs instead"
             say "== update $ver installed (signed with ${key##*/}), restarting"
-            echo "OK $ver" > $IN/result.tmp
+            echo "OK $ver" > $RES
         fi
         rm -f $IN/bundle $IN/bundle.sig
-        chown $DAEMON_USER $IN/result.tmp; mv $IN/result.tmp $IN/result
-        if grep -q "^OK" $IN/result; then
+        res=$(cat $RES)
+        # The rename replaces a file or a link, but onto a directory (or a link to one) mv moves the result into it,
+        # wherever that is.  rm -f above leaves a directory standing, and the daemon may plant either meanwhile: clear it.
+        if [ -L $IN/result ] || { [ -e $IN/result ] && [ ! -f $IN/result ]; }; then rm -rf $IN/result; fi
+        chown $DAEMON_USER $RES; mv -f $RES $IN/result
+        case "$res" in OK*)
             sleep 2                                     # let hassmic relay the result to the pusher
             svc_restart hassmic
             exec sh $SYS/boot.sh firewall               # and run the new firewall script as well
-        fi
+        esac
     done
 }
 
@@ -394,9 +446,9 @@ ota_watch() {
 # Each LED's own layer (the fill, issue #57) takes 9.7 MB of the partition: without room for it, the set without them
 # (HASSMIC_RING_LEDS=0), which counts as installed from then on; Home Assistant then has the light but no fill.
 # A binary in /data wins over the installed one: lets a new build be tried without a trip through TWRP.
-BIN=$D/hassmic; [ -x /data/local/hassmic/hassmic ] && BIN=/data/local/hassmic/hassmic
-LEDNEW=/data/local/hassmic/leds.new
-LEDLOCK=/data/local/hassmic/leds.lock
+BIN=$D/hassmic; [ -x $BASE/hassmic ] && BIN=$BASE/hassmic
+LEDNEW=$BASE/leds.new
+LEDLOCK=$BASE/leds.lock
 leds() {
     LEDS=failed LEDWHY=
     i=0
@@ -429,18 +481,6 @@ leds() {
     rm -rf $LEDNEW $LEDLOCK
 }
 
-# A push update runs "firewall" again (exec, same PID) while the previous firewall watcher is still looping: stop it first,
-# or every update adds one and old and new rules take turns.  Matched by command line, which also catches the ones that
-# earlier versions left behind.  Read with the shell itself: a process that exits between the open and the read leaves
-# the Echo 2's tr (Fire OS 6572) spinning on the read error for ever, and this script never got to the firewall watcher
-# and the installer below (seen 2026-09-30 right after a boot: no egress lock, push updates unanswered).
-if [ "$1" = firewall ]; then
-    for p in /proc/[0-9]*; do
-        c=; while IFS= read -r -d '' a; do c="$c $a"; done 2>/dev/null < $p/cmdline
-        case "$c" in *lockdown.sh*watch*) kill ${p#/proc/} 2>/dev/null;; esac
-    done
-fi
-
 if [ "$MODE" = stock-online ]; then
     # hassmic is off on purpose: that must not count as an update that failed to come up.
     [ "$1" = firewall ] || { echo 0 > $OTA/tries; exit 0; }
@@ -453,7 +493,7 @@ case "$1" in
 firewall)
     quiet
     [ -f $D/wifi.sh ] && sh $D/wifi.sh clean           # a Wi-Fi request from before this start is nobody's
-    rm -f /data/local/hassmic/state/reboot             # nor a reboot: it would reboot every boot
+    rm -f $BASE/state/reboot             # nor a reboot: it would reboot every boot
     sh $D/lockdown.sh watch 2>&1 | stamped >> $LOG &
     ota_watch >> $LOG 2>&1                              # execs on an update: no pipe around it, its lines say when
     ;;
@@ -465,30 +505,37 @@ satellite)
         echo "== satellite start, uptime $(cut -d. -f1 /proc/uptime)s, $(cat $D/VERSION 2>/dev/null || echo factory) from $D"
         sh $D/lockdown.sh services        # stops the cloud daemons that were not up yet at "on boot"; the firewall is the watcher's
         # wake word sets under a short name (echo-de) from installs by hand: the long name Amazon's sets carry (echo-de-DE)
-        [ -f $D/artifact-install.sh ] && sh $D/artifact-install.sh migrate /data/local/hassmic/state /data/local/hassmic
+        [ -f $D/artifact-install.sh ] && sh $D/artifact-install.sh migrate $BASE/state $BASE
         leds                              # before alexa-off.sh: a ledcontroller that started again may want Alexa back
         sh $D/alexa-off.sh; quiet
     } 2>&1 | stamped >> $LOG
     # hassmic offers Wi-Fi motion where the module can be loaded (wifimotion.c), the loop below loads it when needed
     [ -n "$KMOD" ] && [ -f $D/$KMOD ] && export HASSMIC_WIFI_KMOD=/proc/${KMOD%.ko}
-    netwatch 2>&1 | stamped >> $LOG &
+    ( netwatch & echo $! > $OTA/netwatch.pid; wait ) 2>&1 | stamped >> $LOG &     # its pid is kept for the fall back below
     # mDNS through the stock avahi-daemon: hassmic prints the service file for its protocol, name and MAC address.
     # The MAC in it is how Home Assistant tells devices apart.  On radar wlan0 appears only later in the boot, hassmic
     # printed its placeholder MAC, and Home Assistant offered the adopted Echo as a new device.  So wait for Wi-Fi
     # (there is no mDNS without it anyway); hassmic keeps going meanwhile.  The directory belongs to the daemon's user so
     # hassmic can rewrite the file itself when Home Assistant sets or clears the encryption key.
-    mkdir -p /data/misc/avahi/services
-    chown $DAEMON_USER /data/misc/avahi/services
+    # That makes every name in it the daemon's to point elsewhere: root writes the file in its own directory and renames
+    # it in (a rename replaces a link, it does not follow it).  The binary runs as the daemon's user like below: it may be
+    # the test binary in /data, and -S only reads state/api_key and the MAC.
+    AVAHI=${HASSMIC_AVAHI:-/data/misc/avahi}           # only tests/boot_test.sh sets it
+    mkdir -p $AVAHI/services
+    chown $DAEMON_USER $AVAHI/services
     (
         i=0
         while [ $i -lt 120 ] && ! grep -q '[1-9a-f]' /sys/class/net/$WLAN/address 2>/dev/null; do sleep 1; i=$((i + 1)); done
         [ $i -gt 0 ] && echo "mDNS: waited ${i}s for the $WLAN address"
-        $BIN -P ${PROTO:-esphome} $ARGS -S > $AVAHI_SVC
-        chown $DAEMON_USER $AVAHI_SVC; chmod 644 $AVAHI_SVC
+        svc=$AVAHI/hassmic.service.new
+        $D/runas $DAEMON_USER $DAEMON_GROUPS $BIN -P ${PROTO:-esphome} $ARGS -S > $svc
+        chown $DAEMON_USER $svc; chmod 644 $svc
+        # as in ota_watch: onto a directory (or a link to one) mv would move the file into it
+        if [ -L $AVAHI_SVC ] || { [ -e $AVAHI_SVC ] && [ ! -f $AVAHI_SVC ]; }; then rm -rf $AVAHI_SVC; fi
+        mv -f $svc $AVAHI_SVC
         avahi_start
     ) 2>&1 | stamped >> $LOG &
-    # The bootstrap counted this start as an attempt; a minute of hassmic running counts as success.
-    (sleep 60; pidof hassmic > /dev/null && echo 0 > $OTA/tries) &
+    # The bootstrap counted this start as an attempt; the self test passing counts as success (ota_watch).
     fast=0
     while :; do
         t0=$(cut -d. -f1 /proc/uptime)
@@ -504,6 +551,7 @@ satellite)
         if [ $fast -ge 5 ] && [ "$D" != "$SYS" ]; then
             say "== update $(cat $D/VERSION 2>/dev/null) keeps exiting: running the factory copy" >> $LOG
             echo 3 > $OTA/tries
+            kill $(cat $OTA/netwatch.pid 2>/dev/null) 2>/dev/null     # the factory copy starts its own: two would both reload the firewall
             exec sh $SYS/boot.sh satellite
         fi
         # ALEXA_PROP may have been set again meanwhile (ledcontroller restart)
