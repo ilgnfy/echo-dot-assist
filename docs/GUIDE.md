@@ -324,8 +324,9 @@ and the action button pauses and resumes.
   until it is back (after 30 s, then less and less often, at most every 30 min). Where Music Assistant cannot see the
   Echo's announcements (another subnet or VLAN), add `<echo-ip>:28928` under its Sendspin provider's "Manual IP
   addresses for discovery": with the port, since a bare address means Sendspin's default 8928, which is not the Echo's.
-- **From a phone** over Bluetooth: SBC, AAC, aptX, aptX HD, with media controls. Switch on "Bluetooth audio from phones" on the
-  settings page; the "Bluetooth phones: pairing" switch in Home Assistant then lets phones pair (blue chaser on the ring).
+- **From a phone** over Bluetooth: SBC, aptX, aptX HD, and AAC once "Bluetooth phones: AAC" is on (off by default, see [security](SECURITY.md#bluetooth)),
+  with media controls. Switch on "Bluetooth audio from phones" on the settings page; the "Bluetooth phones: pairing" switch in Home Assistant then lets phones
+  pair (blue chaser on the ring). iPhones prefer AAC and use SBC without it.
 
 ### Separate volumes
 
@@ -416,7 +417,8 @@ While a phone plays, the proxy stops scanning: the radio cannot do both without 
 | Sendspin pairing token | diagnostic, disabled by default |
 | Mic level, Noise reduction | configuration: the level the pipeline gets, RNNoise (off / low / medium / high) |
 | Bluetooth phones: pairing, announcements, announcement language | configuration; "Bluetooth speaker: …" for the other direction, see below |
-| Debug access (adb over Wi-Fi) | configuration: opens adb for 30 minutes, only over the encrypted connection |
+| Debug access (adb over Wi-Fi) | configuration: opens adb for 30 minutes for the network, only over the encrypted connection |
+| Bluetooth phones: AAC, Bluetooth proxy: secure pairing only | configuration, both off; turning them on / off the weaker way needs the encrypted connection |
 | Music Assistant without pairing | configuration: any Music Assistant on the network may play |
 | Sound detection, Wi-Fi motion detection, Join arbitration network | the switches of the features below: the rest of a feature's entities appears while it is on |
 | SoC temperature, CPU usage | diagnostic, disabled by default |
@@ -616,7 +618,7 @@ for 30 minutes:
 - **Debug access** on the settings page, confirmed with the action button, then `adb connect <echo-ip>:5555`. Closes
   after 30 minutes, when you close it there, and at every reboot.
 - `scripts/adb-wifi.sh <echo-ip>` on the PC you installed from: proven with your `secrets/update.key` instead of Home
-  Assistant. The way in when the Echo is not adopted, lost its key, runs Wyoming, or Home Assistant is down. Needs
+  Assistant, and open **for that PC's address only**. The way in when the Echo is not adopted, lost its key, runs Wyoming, or Home Assistant is down. Needs
   hassmic running.
 - `ADB_WIFI=1` in `hassmic.conf`: open for good, until you take the line out (no reboot needed). For development, and
   the only way with `MODE=stock-online`.

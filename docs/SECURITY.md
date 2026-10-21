@@ -48,7 +48,9 @@ take at most 3 MB of the partition, and root checks the room before it writes.
 A root shell without authentication: the unlock turns adbd's key check off. Over Wi-Fi it is closed: adbd runs without
 its network listener and the firewall drops port 5555. The [ways to open it](GUIDE.md#adb-over-wi-fi) need an
 approved browser plus a press of the action button for that one request, a fresh challenge signed with your update key
-(a recorded exchange does not work twice), or `ADB_WIFI=1` in root's `hassmic.conf`.
+(a recorded exchange does not work twice), or `ADB_WIFI=1` in root's `hassmic.conf`. Opened with the update key (`scripts/adb-wifi.sh`), the
+firewall admits **the address that signed the request and no other** (INPUT rule with `-s <ip>/32`; anything that is not one plain IPv4 address
+is refused, not widened); the switch in Home Assistant, the settings page and `ADB_WIFI=1` admit the network.
 
 While it is open, anyone on the network has root. USB always works: physical access is root access anyway. Without
 `hassmic.conf` (stock behaviour, or before the install) it is open, as stock leaves it.
@@ -91,9 +93,24 @@ Your key also opens adb over Wi-Fi. The Echo fetches no update from the internet
 ## Bluetooth
 
 - Keys in `state/ble_bonds` (proxy) and `state/bt_keys` (speaker), under `/data/local/hassmic/`.
+- **Hostile peers**: SDP data lengths and L2CAP MTUs are checked, an authentication failure no longer deletes a link key, pairing happens only inside its
+  window, audio at a rate the player has no room for is refused, the ACL credit pool is shared with LE.  "Bluetooth phones: AAC" is off by default: AAC goes
+  into the firmware's FFmpeg, a big decoder fed by whatever a phone sends; "Bluetooth proxy: secure pairing only" (off by default) turns away devices without LE
+  Secure Connections and stops using legacy bonds.  Turning either the weaker way from Home Assistant needs the encrypted connection.
 - **Setup from a phone (Improv)**: offered only without a network: to anyone in range on an Echo that is not set up
   (nothing to lose there), only after a press of the action button on one that is. The Wi-Fi password crosses
   Bluetooth unencrypted, as with every Improv device; the Echo keeps only the network key derived from it.
+
+## Root side of updates and the boot
+
+`scripts/system/main.sh` runs as root and shares directories with the daemon, so it never writes through a name the daemon could have turned into a link:
+the update's result is written in root's own folder and renamed into `state/ota/` (a link or directory in its place is cleared first), and the mDNS file is made
+by the daemon's user in root's folder and renamed in.  The start counter of an update is reset only by a passed self test of the update's own binary (a hung
+update falls back, a fall back sticks).  A bundle whose scripts carry CR LF (a Windows checkout) or do not parse is refused; a `hassmic.conf` with CR LF is converted
+and one that does not load leaves the firewall up and is not counted against the update.  `tests/boot_test.sh` runs `main.sh` itself against stand-ins under mksh.
+
+Network limits: ESPHome gives a connection 10 s for its first message and makes room when all slots are taken; the push port cuts a connection that trickles
+bytes; Sendspin takes the pause command only from an admitted, paired session.
 
 ## Factory reset
 

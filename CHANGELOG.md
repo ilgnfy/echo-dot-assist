@@ -4,6 +4,12 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-22
 
+- **Safer, from the original project**: the boot and update scripts no longer write through names the daemon could have turned into links; an update counts as
+  good only after its self test; broken or CR LF bundles and configs are refused; Bluetooth, Sendspin, the ESPHome port and the push port have limits against
+  hostile peers; adb over Wi-Fi opened with your update key is open for **your PC's address only**. New switches in Home Assistant (both off): "Bluetooth phones: AAC" (iPhones use
+  SBC without it) and "Bluetooth proxy: secure pairing only". Entities that were only on the settings page are listed in Home Assistant again (mic level, noise reduction, debug
+  access, Bluetooth announcements, the sound detection, Wi-Fi motion and arbitration switches, SoC temperature, CPU usage), Bluetooth ones grouped by name. Details: docs/original-vs-fork.md.
+
 - **Nothing that needs Amazon or GitHub is left in the Echo's software.** Removed: the settings page's "Download from Amazon" (and
   `scripts/artifacts.sh`), whisper detection (its sensor "Last request whispered" and setting: the model came only from that
   download), and online updates from GitHub (the setting, and the firmware *update* entity). An update is pushed from your PC
