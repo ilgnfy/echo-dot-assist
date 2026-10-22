@@ -16,8 +16,8 @@ AirPlay 2 speakers through the clock nqptp shares.
 | `lockdown.sh` | root | admits UDP 319 and 320 from private and link-local ranges, only while `airplay=on` (`airplay_state`, like Kiosk Satellite's port); `check` catches them left open |
 
 Ports: RTSP 28933, UDP 28940-28979 (shairport-sync's "any port" sockets), all in the range the firewall admits already.
-Name: the Echo's name ("Echo Dot 3 5695c4"). The sender's volume is applied by shairport-sync in software; hassmic's music
-volume (and the separate volumes) apply on top, as for every music source.
+Name: the Echo's name ("Echo Dot 3 5695c4"). The sender's volume slider is ignored (`ignore_volume_control`): applied in software it left AirPlay far quieter than the other sources; hassmic's music
+volume (and the separate volumes) rule, as for every music source.
 
 ## Why glibc, static
 
