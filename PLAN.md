@@ -2282,13 +2282,16 @@ red and to the patterns of a running pipeline.
 
 ### AirPlay 2 receiver (shairport-sync), next to the media player and the Bluetooth speaker
 
-**Status 2026-10-22: built, runs on the Echo, not yet heard with a real sender.**  Done: static glibc ARM builds of shairport-sync (`b991d91`, AirPlay 2) and nqptp 1.2.9
+**Status 2026-10-22: works with a Mac (macOS AirPlay, video with lip sync).**  Done: static glibc ARM builds of shairport-sync (`b991d91`, AirPlay 2) and nqptp 1.2.9
 (`tools/airplay/build.sh`, docs/airplay.md says why glibc and not bionic: no `pthread_cancel`), mDNS through avahi service files (patched backend), `airplay.c`
 (supervisor, FIFO into the music stream, `MUSIC_AIRPLAY`), root's nqptp and the firewall rules, settings/Home Assistant switch/page help, `tests/fake_ha_airplay.py`.
-Checked on the Echo by hand: both start as the daemon's user (nqptp as root), the records show up in `avahi-browse` from the PC, a client gets as far as SETUP
-(pyatv times with NTP and is refused: it cannot play AirPlay 2).  **To do with an iPhone/Mac:** does it find the Echo, does audio play, how many ms is the right
-"AirPlay delay" against another AirPlay 2 speaker, CPU/RAM while playing (`taskmgr`), does an Apple device keep it in a group; the media-player entity does not
-show AirPlay as a source (no title/state) yet; no metadata or cover art (shairport-sync can give them, the pipe backend does not).  The analysis below is from before the build.
+Found only with a real sender (pyatv cannot play AirPlay 2): (1) shairport-sync opened its TCP event/data and UDP control/audio ports at random (51722, 47902: the
+firewall admits 16384-32767) -> `patches/0002-ports-in-range.patch` takes them from `udp_port_base`'s range; (2) the Mac sends its PTP clock over IPv6 (ULA), ip6tables had no
+319/320 -> `lockdown.sh` admits them over IPv6 too ("No NQPTP master clock" in the log was the sign); (3) `output_format`/`output_rate` are read from the `pipe` stanza, not
+`general` -> without them AirPlay 2 gives S32 at 48 kHz and it played as static; (4) the reader dropped the tail of a read that ended inside a frame; (5) lip sync: a fixed
+250 ms guess and the FIFO's 64 KB (370 ms) -> the FIFO is 4 KB and the delay is worked out (`total_ms`: queue 110 + FIFO 11 + output 70 + Bluetooth speaker), the setting is a trim.
+Verbosity 2 of shairport-sync stays on (its log lines go to boot.log).  **Still open:** CPU/RAM while playing (`taskmgr`), an iPhone and a group with other AirPlay 2 speakers, the
+media-player entity does not show AirPlay as a source (no title/state), no metadata or cover art (shairport-sync can give them, the pipe backend does not).  The analysis below is from before the build.
 
 Analysis of 2026-10-21; nothing built.  Sources: shairport-sync's AIRPLAY2.md and BUILD.md, nqptp's README (fetched that day, their wording summarised),
 the device and the repo.  Things marked *check* are from memory or inferred and need a test before anyone relies on them.
