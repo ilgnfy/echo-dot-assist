@@ -5,6 +5,7 @@ streaming TTS), announcements over HTTP and HTTPS, do not disturb, volume, mute.
 fake_ha_esphome_{timers,features,buttons,address}.py."""
 import asyncio, os, signal, socket, subprocess
 from aioesphomeapi import SelectInfo, SwitchInfo, NumberInfo, NumberState, SwitchState, TextSensorInfo, TextSensorState, SensorInfo
+from aioesphomeapi import MediaPlayerCommand
 from aioesphomeapi import APIClient, MediaPlayerInfo, MediaPlayerEntityState, VoiceAssistantEventType as Ev, BinarySensorInfo, BinarySensorState
 from esphome_common import ROOT, check, until, sync, peak, speech, settled, run
 
@@ -286,6 +287,24 @@ async def main(e):
 
     res = await cli.send_voice_assistant_announcement_await_response("http://127.0.0.1:1/none.wav", 15, "x")
     check(not res.success, "unreachable announcement URL reports failure")
+
+    # Home Assistant's media stop while the audio is still being fetched: that one is dropped, and only that one (the stop used to outlive it,
+    # and every reply after it stayed silent until a restart)
+    before = os.path.getsize(play); finished.clear()
+    slow = asyncio.ensure_future(cli.send_voice_assistant_announcement_await_response(f"http://127.0.0.1:{HTTP_PORT}/tts-slow.mp3", 15, "x"))
+    await asyncio.sleep(0.5)
+    cli.media_player_command(mp[0].key, command=MediaPlayerCommand.STOP)
+    res = await slow
+    check(not res.success and os.path.getsize(play) == before, f"media stop during the fetch drops that announcement: success={res.success}")
+    res = await cli.send_voice_assistant_announcement_await_response(f"http://127.0.0.1:{HTTP_PORT}/a.wav", 15, "x")
+    check(res.success and os.path.getsize(play) - before == 48000, f"the next announcement plays: {os.path.getsize(play) - before} bytes")
+    started.clear(); proc.send_signal(signal.SIGUSR1); await asyncio.wait_for(started.wait(), 5)
+    cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_RUN_START, None)
+    cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_STT_END, {"text": "turn on the light"})
+    cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_TTS_END, {"url": f"http://127.0.0.1:{HTTP_PORT}/reply.wav"})
+    cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_RUN_END, None)
+    await asyncio.sleep(2.0)
+    check(os.path.getsize(play) - before == 2 * 48000, f"and so does the next reply: {os.path.getsize(play) - before - 48000} bytes")
 
     # Home Assistant serving HTTPS itself (issue #30): its URLs are https://, played through libcurl (https.c)
     check(pv("https_verify") == 1, f"HTTPS certificates are checked by default: {pv('https_verify')}")

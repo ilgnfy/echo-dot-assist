@@ -219,7 +219,7 @@ static int connected, satellite_running;
 static _Atomic(enum state) state;              /* changed under core_lock; the audio threads peek without it (core.h) */
 static time_t state_since;
 static atomic_int streaming, trigger_pending, button_pending, pair_pending, stop_pending, quit;
-static atomic_int flush_playback, alarm_on;   /* barge-in: drop queued TTS; a finished timer rings */
+static atomic_int alarm_on;   /* barge-in: drop queued TTS; a finished timer rings */
 static atomic_int busy;                             /* state != IDLE, for threads without the lock (the ring pauses) */
 static atomic_int tts_on, music_on;                 /* something plays: the wake word model lowers its threshold then.
                                                     * music_on: MUSIC_* bits */
@@ -904,8 +904,11 @@ void core_mic_off(void) { atomic_store(&streaming, 0); mic_stopped(); }
 
 void core_restart_after(void) { barge_in = 1; barge_from = 0; }
 
+static void tts_pending_spent(void);
+
 void core_pipeline_finish(void)
 {
+    tts_pending_spent();
     if (atomic_exchange(&streaming, 0) && connected && proto->stop) proto->stop();
     mic_stopped();
     core_set_state(IDLE);
@@ -945,6 +948,8 @@ void core_no_speech(void)
 }
 
 /* touch: the action button rather than the wake word.  from: where the wake word ended on the ring's clock (0: unknown) */
+static void tts_cut(void);
+
 static void trigger(int touch, uint64_t from)
 {
     pthread_mutex_lock(&core_lock);
@@ -976,12 +981,12 @@ static void trigger(int touch, uint64_t from)
         if (touch) wake_phrase[0] = 0;                          /* the button: the first wake word's assistant */
         sound_request(touch ? SND_TOUCH : SND_WAKE);
         pipeline_start(touch ? 0 : from);
-    } else if (state == SPEAKING && !atomic_load(&flush_playback)) {       /* not already being cut.  barge_in alone does not
+    } else if (state == SPEAKING && !core_tts_flushing()) {                /* not already being cut.  barge_in alone does not
                                                                              * say that: continue-conversation sets it too */
         fprintf(stderr, "barge-in\n");
         wake_cut_ms = mono_ms();
         barge_in = 1; barge_from = from;
-        atomic_store(&flush_playback, 1);   /* playback thread drops TTS up to audio-stop, then we restart */
+        tts_cut();                          /* playback thread drops TTS up to audio-stop, then we restart */
     }
     pthread_mutex_unlock(&core_lock);
 }
@@ -1017,7 +1022,7 @@ static void stop_word(void)
         fprintf(stderr, "stop: reply cut\n");
         barge_in = 0;
         atomic_fetch_and(&sounds_pending, ~(1 << SND_WAKE | 1 << SND_TOUCH));
-        atomic_store(&flush_playback, 1);
+        tts_cut();
     } else if (state == LISTENING && mono_ms() - wake_cut_ms < 4000) {
         fprintf(stderr, "stop: pipeline dropped\n");
         atomic_fetch_and(&sounds_pending, ~(1 << SND_WAKE | 1 << SND_TOUCH));
@@ -1374,14 +1379,31 @@ static void on_pair(void)
 
 /* ---------------------------------------------------------------- playback queue */
 
-struct item { struct item *next; int kind, media; unsigned rate, ch; size_t len; unsigned char data[]; };   /* media: Q_START */
+/* Replies are numbered streams: core_tts_begin starts the next one.  A cut (barge-in, "stop", Home Assistant's media stop) drops the stream that
+ * is queued or playing and everything before it; it can never outlast that stream, so the next reply always plays.  It used to be one flag that
+ * only the end of a played stream cleared: a media stop while the reply was still being fetched never got one, and every reply after it stayed
+ * silent until hassmic restarted.  With nothing queued, a media stop is for the fetch under way (proto_esphome.c): it is kept for the stream
+ * about to begin, and spent when that begins or the pipeline ends without one. */
+struct item { struct item *next; int kind, media; unsigned gen, rate, ch; size_t len; unsigned char data[]; };   /* media: Q_START */
 enum { Q_START, Q_DATA, Q_STOP };
 static void tts_kind(int media);
 
-static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t q_cond = PTHREAD_COND_INITIALIZER;
+/* Wyoming has no authentication and Home Assistant sends TTS faster than it plays: without a bound the queue took a whole reply, or anything a
+ * client cared to send, into memory.  At 22050 Hz mono this is 12 s ahead of the speaker (ESPHome's fetch holds back at 256 KiB by itself); a
+ * producer that finds it full waits, and drops after TTS_WAIT_MS of a playback that does not move. */
+#define TTS_QUEUE_MAX (1024 * 1024)
+#define TTS_WAIT_MS   5000
+
+static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;   /* inside core_lock where both are taken */
+static pthread_cond_t q_cond = PTHREAD_COND_INITIALIZER, q_space = PTHREAD_COND_INITIALIZER;
 static struct item *q_head, *q_tail;
 static size_t q_bytes;
+static unsigned tts_gen;            /* under q_lock: the newest stream begun */
+static unsigned tts_done;           /* under q_lock: the newest stream whose end the playback thread has played out */
+static unsigned tts_cut_to;         /* under q_lock: streams up to this one are dropped */
+static int tts_cut_next;            /* under q_lock: and the one about to begin */
+
+static int tts_cutting(void) { return tts_cut_next || (tts_cut_to == tts_gen && tts_done != tts_gen); }    /* q_lock held */
 
 static void q_push(int kind, int media, unsigned rate, unsigned ch, const void *data, size_t len)
 {
@@ -1390,10 +1412,34 @@ static void q_push(int kind, int media, unsigned rate, unsigned ch, const void *
     it->next = NULL; it->kind = kind; it->media = media; it->rate = rate; it->ch = ch; it->len = len;
     if (len) memcpy(it->data, data, len);
     pthread_mutex_lock(&q_lock);
+    if (kind == Q_START) { if (tts_cut_next) { tts_cut_to = tts_gen + 1; tts_cut_next = 0; } tts_gen++; }
+    it->gen = tts_gen;
+    if (kind == Q_DATA) {           /* back pressure: never with core_lock held (core.h), so the wait stops no one else */
+        struct timespec until; clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_sec += TTS_WAIT_MS / 1000;
+        while (q_bytes + len > TTS_QUEUE_MAX && it->gen > tts_cut_to)
+            if (pthread_cond_timedwait(&q_space, &q_lock, &until)) {
+                fprintf(stderr, "play: playback stuck, %zu bytes queued: TTS audio dropped\n", q_bytes);
+                break;
+            }
+        if (it->gen <= tts_cut_to || q_bytes + len > TTS_QUEUE_MAX) { pthread_mutex_unlock(&q_lock); free(it); return; }
+    }
     if (q_tail) q_tail->next = it; else q_head = it;
     q_tail = it; q_bytes += len;
     pthread_cond_signal(&q_cond);
     pthread_mutex_unlock(&q_lock);
+}
+
+static void tts_cut(void)               /* drop what is queued or playing; nothing when nothing is */
+{
+    pthread_mutex_lock(&q_lock);
+    if (tts_done != tts_gen) { tts_cut_to = tts_gen; pthread_cond_broadcast(&q_space); }
+    pthread_mutex_unlock(&q_lock);
+}
+
+static void tts_pending_spent(void)     /* lock held: a cut kept for a stream that did not come is over with the pipeline */
+{
+    pthread_mutex_lock(&q_lock); tts_cut_next = 0; pthread_mutex_unlock(&q_lock);
 }
 
 static void *playback_thread(void *arg)
@@ -1406,9 +1452,11 @@ static void *playback_thread(void *arg)
         struct item *it = q_head;
         q_head = it->next; if (!q_head) q_tail = NULL;
         q_bytes -= it->len;
+        int drop = it->kind != Q_STOP && it->gen <= tts_cut_to;
+        pthread_cond_broadcast(&q_space);
         pthread_mutex_unlock(&q_lock);
 
-        if (atomic_load(&flush_playback) && it->kind != Q_STOP) {
+        if (drop) {
             if (open) { play_close(0); open = 0; }
             free(it);
             continue;
@@ -1427,8 +1475,10 @@ static void *playback_thread(void *arg)
         case Q_STOP:
             if (open) { play_close(1); open = 0; }
             atomic_store(&tts_on, 0); playback_hint();
-            atomic_store(&flush_playback, 0);
+            /* The stream counts as over only under core_lock, together with the state going back to IDLE: a wake word in between would have
+             * seen SPEAKING and a stream already ended, cut nothing and flagged nothing, and the barge-in it starts is the restart below. */
             pthread_mutex_lock(&core_lock);
+            pthread_mutex_lock(&q_lock); tts_done = it->gen; pthread_cond_broadcast(&q_space); pthread_mutex_unlock(&q_lock);
             if (proto->played) proto->played();      /* also without a client: modules reset their state here */
             core_pipeline_finish();
             pthread_mutex_unlock(&core_lock);
@@ -1447,10 +1497,17 @@ void core_tts_begin(unsigned rate, unsigned channels, int media)
     q_push(Q_START, media, rate, channels, NULL, 0);
 }
 
-void core_tts_data(const void *pcm, size_t len) { if (!atomic_load(&flush_playback)) q_push(Q_DATA, 0, 0, 0, pcm, len); }
+void core_tts_data(const void *pcm, size_t len) { q_push(Q_DATA, 0, 0, 0, pcm, len); }
 void core_tts_end(void) { q_push(Q_STOP, 0, 0, 0, NULL, 0); }
-int  core_tts_flushing(void) { return atomic_load(&flush_playback); }
-void core_tts_flush(void) { atomic_store(&flush_playback, 1); }
+int  core_tts_flushing(void) { pthread_mutex_lock(&q_lock); int r = tts_cutting(); pthread_mutex_unlock(&q_lock); return r; }
+
+void core_tts_flush(void)
+{
+    pthread_mutex_lock(&q_lock);
+    if (tts_done != tts_gen) tts_cut_to = tts_gen; else tts_cut_next = 1;
+    pthread_cond_broadcast(&q_space);
+    pthread_mutex_unlock(&q_lock);
+}
 
 size_t core_tts_queued(void)
 {
