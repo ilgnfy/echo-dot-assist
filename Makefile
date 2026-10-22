@@ -196,7 +196,7 @@ host: build/hassmic-host $(OUT)/hassmic-qemu build/otatool-host
 UNIT := src/hassmic/hash.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/third_party/monocypher.c
 # One target per test, so make -j unit runs them side by side (tests/run.py does: most of them wait or compile).
 UNIT_TESTS := hash ws noise ble_crypto micgain wifimotion spkgain tz statefile ledq micdenoise earsup a2dp_codecs \
-	sbc web_crypto ring_pack mww alarmtime taskmgr blueprint_dropin debloat_edit
+	sbc web_crypto ring_pack mww alarmtime taskmgr blueprint_dropin debloat_edit netacl
 unit: $(addprefix unit-,$(UNIT_TESTS))
 unit-hash:
 	@mkdir -p build
@@ -224,6 +224,9 @@ unit-spkgain:
 unit-tz:
 	@mkdir -p build
 	cc -O2 -Wall -Wextra -Isrc/hassmic tests/unit/tz_test.c src/hassmic/tz.c -o build/tz_test && .venv/bin/python tests/unit/tz_ref.py build/tz_test
+unit-netacl:
+	@mkdir -p build
+	cc -O2 -Wall -Wextra -Isrc/hassmic -Isrc/include tests/unit/netacl_test.c $(UNIT) -lpthread -o build/netacl_test && build/netacl_test
 unit-statefile:
 	@mkdir -p build
 	cc -O2 -Wall -Wextra -Isrc/hassmic tests/unit/statefile_test.c src/hassmic/statefile.c -Wl,--wrap=fsync,--wrap=rename -lpthread -o build/statefile_test && build/statefile_test

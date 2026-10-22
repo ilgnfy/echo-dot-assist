@@ -52,6 +52,7 @@
 #include "micdenoise.h"
 #include "earsup.h"
 #include "micgain.h"
+#include "net.h"
 #include "netaddr.h"
 #include "netio.h"
 #include "wake.h"
@@ -2418,6 +2419,22 @@ static void na_announce(const char *why)
     else fprintf(stderr, "mDNS: announced again (%s)\n", why);
 }
 
+/* -A: a Wyoming client is whoever connects (the protocol has no authentication), and the newest one wins, so anyone on the network could take
+ * Home Assistant's place and hear the microphone.  Closed at accept, before serve() gets it and pushes the real client out.  Logged once a
+ * minute at most: a scanner must not fill the log. */
+static struct net_allow allow;
+static const char *allow_spec;
+static int peer_allowed(int c)
+{
+    static long long logged;
+    struct sockaddr_in sa; socklen_t sl = sizeof sa; char ip[16];
+    if (!allow.n) return 1;
+    uint32_t from = getpeername(c, (struct sockaddr *)&sa, &sl) ? 0 : net_peer4((struct sockaddr *)&sa, sl);
+    if (from && net_allowed(&allow, from)) return 1;
+    if (mono_ms() - logged > 60000 || !logged) { logged = mono_ms(); net_ntoa4(from, ip); fprintf(stderr, "connection from %s refused: not in -A\n", ip); }
+    return 0;
+}
+
 static void on_usr1(int s) { (void)s; atomic_store(&trigger_pending, 1); }
 static void on_usr2(int s) { (void)s; atomic_store(&button_pending, 1); }
 static void on_hup(int s) { (void)s; atomic_store(&stop_pending, 1); }
@@ -2429,7 +2446,7 @@ int main(int argc, char **argv)
 {
     const char *manifest = NULL, *input = board.keypad; int port = 0, print_mdns = 0, o;
     micgain_init(&mic_gain, MICGAIN_LEVEL);            /* until the protocol has its saved settings (Wyoming: always) */
-    while ((o = getopt(argc, argv, "P:p:n:w:m:b:z:o:a:i:W:G:LEVSTB")) != -1) switch (o) {
+    while ((o = getopt(argc, argv, "P:p:n:w:m:b:z:o:a:i:W:A:G:LEVSTB")) != -1) switch (o) {
         case 'G': return ring_generate(optarg);     /* root, at the satellite's start (main.sh leds) */
         case 'P': proto = !strcmp(optarg, "wyoming") ? &proto_wyoming : &proto_esphome; break;
         case 'p': port = atoi(optarg); break;
@@ -2442,13 +2459,14 @@ int main(int argc, char **argv)
         case 'a': arb_port = atoi(optarg); break;
         case 'i': dropin_port = atoi(optarg); break;
         case 'W': core_web_port = atoi(optarg); break;
+        case 'A': allow_spec = optarg; if (net_allow_parse(&allow, optarg)) { fprintf(stderr, "-A %s: not a list of IPv4 addresses and subnets\n", optarg); return 2; } break;
         case 'L': use_led = 0; break;
         case 'E': use_earcon = 0; break;
         case 'V': use_volume = 0; break;
         case 'S': print_mdns = 1; break;
         case 'B': use_bt = 0; break;
         case 'T': { char tok[160]; sendspin_init(); sendspin_pairing_token(tok, sizeof tok); puts(tok); return 0; }
-        default: fprintf(stderr, "usage: hassmic [-P esphome|wyoming] [-p port] [-n name] [-w local|remote] [-m manifest] [-b input-device] [-z port] [-o port] [-a port] [-i port] [-W port] [-G dir] [-L] [-E] [-V] [-S]\n"); return 2;
+        default: fprintf(stderr, "usage: hassmic [-P esphome|wyoming] [-p port] [-n name] [-w local|remote] [-m manifest] [-b input-device] [-z port] [-o port] [-a port] [-i port] [-W port] [-A addresses] [-G dir] [-L] [-E] [-V] [-S]\n"); return 2;
     }
     core_port = port ? port : proto->port;
     if (!core_name) name_make();
@@ -2521,6 +2539,7 @@ int main(int argc, char **argv)
     if (ls < 0) { perror("listen"); return 1; }
     static const struct netaddr_hooks na_hooks = { na_peers, sizeof na_peers / sizeof na_peers[0], na_announce };
     netaddr_start(&na_hooks);
+    if (allow.n) fprintf(stderr, "%s: connections only from %s\n", proto->id, allow_spec);
     fprintf(stderr, "hassmic " VERSION " (" BUILD ") %s on %d, wake=%s\n", proto->id, core_port, core_local_wake ? "local" : "remote");
     /* Also without the push port: the passed self test is what keeps an installed update from being undone after three
      * boots (main.sh), online updates included. */
@@ -2528,6 +2547,7 @@ int main(int argc, char **argv)
     while (!atomic_load(&quit)) {
         int c = net_accept(ls);
         if (c < 0) break;
+        if (!peer_allowed(c)) { close(c); continue; }
         /* A link that went away must not hold a client slot (or core_lock, in a blocked write) for ever:
          * writes give up after 5 s, keepalive notices a dead peer within ~25 s.  Both make serve() return.  Keepalive
          * only probes while nothing waits for an acknowledgement, though; with a state update unacknowledged the

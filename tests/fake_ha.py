@@ -28,6 +28,30 @@ async def expect(client, pred, what, timeout=5):
     return await asyncio.wait_for(loop(), timeout)
 
 
+async def refused(env):
+    """-A without the loopback: a connection from it is closed at once, before it could push a real client out;
+    a -A that is not a list of addresses is refused at the start."""
+    log = tempfile.mktemp(suffix=".log")
+    other = subprocess.Popen([f"{ROOT}/build/hassmic-host", "-P", "wyoming", "-p", str(PORT + 1), "-z", "0", "-o", "0", "-a", "0",
+                              "-A", "192.168.99.1,10.0.0.0/8"], env=env, stderr=open(log, "w"), start_new_session=True)
+    try:
+        await asyncio.sleep(0.3)
+        r, w = await asyncio.open_connection("127.0.0.1", PORT + 1)
+        w.write(b'{"type": "describe"}\n')
+        assert await asyncio.wait_for(r.read(), 2) == b"", "a peer outside -A was answered"
+        w.close()
+        text = open(log).read()
+        assert "connection from 127.0.0.1 refused: not in -A" in text and "client connected" not in text, text
+        print("ok   a peer outside -A (192.168.99.1,10.0.0.0/8) is refused at accept")
+    finally:
+        os.killpg(other.pid, signal.SIGKILL); other.wait(); os.unlink(log)
+    for bad in ("192.168.1.010", "192.168.1.1/0", "192.168.1.1;rm", "homeassistant.local"):
+        rc = subprocess.run([f"{ROOT}/build/hassmic-host", "-P", "wyoming", "-A", bad], env=env, capture_output=True).returncode
+        assert rc == 2, f"-A {bad}: rc {rc}"
+    print("ok   -A that is not a strict list of IPv4 addresses and subnets: refused at the start")
+
+
+
 async def main():
     play = tempfile.mktemp(suffix=".raw")
     env = dict(os.environ, HASSMIC_PLAY=play)
@@ -37,9 +61,12 @@ async def main():
         cmd = [f"{ROOT}/tools/qrun.sh", "-t", "120", f"{ROOT}/build/{os.environ.get('DEVICE', 'donut')}/hassmic-qemu", "-P", "wyoming"]
     else:
         cmd = [f"{ROOT}/build/hassmic-host", "-P", "wyoming"]
-    proc = subprocess.Popen(cmd + ["-p", str(PORT), "-n", "Test Dot"], env=env, start_new_session=True)
+    # -A: only Home Assistant's address may connect (Wyoming has no authentication); here that is the loopback
+    proc = subprocess.Popen(cmd + ["-p", str(PORT), "-n", "Test Dot", "-A", "127.0.0.1,192.168.0.0/16"], env=env, start_new_session=True)
     try:
         wait_port(PORT, secs=60 if qemu else 20)
+        if not qemu:
+            await refused(env)
         async with AsyncTcpClient("127.0.0.1", PORT) as client:
             await client.write_event(Describe().event())
             info = Info.from_event(await expect(client, Info.is_type, "info"))

@@ -280,3 +280,74 @@ ssize_t net_read_until(int fd, char *buf, size_t cap, const char *delim, long lo
         if (have >= cap - 1) return -1;                 /* too long for the caller's buffer */
     }
 }
+
+/* ---------------------------------------------------------------- who may connect */
+
+uint32_t net_peer4(const struct sockaddr *sa, socklen_t len)
+{
+    if (!sa || len < (socklen_t)sizeof(struct sockaddr_in) || sa->sa_family != AF_INET) return 0;
+    return ntohl(((const struct sockaddr_in *)sa)->sin_addr.s_addr);
+}
+
+void net_ntoa4(uint32_t a, char out[16]) { snprintf(out, 16, "%u.%u.%u.%u", a >> 24, (a >> 16) & 255, (a >> 8) & 255, a & 255); }
+
+/* A decimal number of 1-3 digits without a leading zero, up to max; *s moves past it.  -1 if there is none. */
+static int number(const char **s, int max)
+{
+    const char *p = *s; int v = 0, n = 0;
+    while (*p >= '0' && *p <= '9' && n < 3) { v = v * 10 + (*p++ - '0'); n++; }
+    if (!n || (n > 1 && **s == '0') || (*p >= '0' && *p <= '9') || v > max) return -1;
+    *s = p;
+    return v;
+}
+
+int net_allow_parse(struct net_allow *a, const char *s)
+{
+    a->n = 0;
+    for (;;) {
+        uint32_t addr = 0; int len = 32, v;
+        for (int i = 0; i < 4; i++) {
+            if ((i && *s++ != '.') || (v = number(&s, 255)) < 0) { a->n = 0; return -1; }
+            addr = addr << 8 | (uint32_t)v;
+        }
+        if (*s == '/' && (s++, (len = number(&s, 32)) < 1)) { a->n = 0; return -1; }
+        if (a->n == NET_ALLOW_MAX) { a->n = 0; return -1; }
+        a->mask[a->n] = len == 32 ? 0xffffffffu : ~(0xffffffffu >> len);
+        a->net[a->n] = addr & a->mask[a->n]; a->n++;
+        if (!*s) return 0;
+        if (*s++ != ',') { a->n = 0; return -1; }
+    }
+}
+
+int net_allowed(const struct net_allow *a, uint32_t addr)
+{
+    if (!a->n) return 1;
+    for (int i = 0; i < a->n; i++) if ((addr & a->mask[i]) == a->net[i]) return 1;
+    return 0;
+}
+
+long long net_backoff_left(const struct net_backoff *b, uint32_t addr, long long now)
+{
+    for (int i = 0; i < NET_BACKOFF_N; i++)
+        if (b->e[i].first && b->e[i].addr == addr) return b->e[i].until > now ? b->e[i].until - now : 0;
+    return 0;
+}
+
+void net_backoff_result(struct net_backoff *b, uint32_t addr, int ok, long long now)
+{
+    int slot = -1, old = 0;
+    for (int i = 0; i < NET_BACKOFF_N && slot < 0; i++) {
+        if (b->e[i].first && b->e[i].addr == addr) slot = i;
+        else if (b->e[i].first < b->e[old].first) old = i;
+    }
+    if (slot < 0) {
+        if (ok) return;
+        slot = old; memset(&b->e[slot], 0, sizeof b->e[slot]); b->e[slot].addr = addr; b->e[slot].first = now;
+    }
+    if (ok) { memset(&b->e[slot], 0, sizeof b->e[slot]); return; }
+    /* a count older than the window, or a refusal that has run out, starts again */
+    if (now - b->e[slot].first >= NET_BACKOFF_MS || (b->e[slot].until && b->e[slot].until <= now)) {
+        b->e[slot].fails = 0; b->e[slot].until = 0; b->e[slot].first = now;
+    }
+    if (++b->e[slot].fails >= NET_BACKOFF_FAILS) b->e[slot].until = now + NET_BACKOFF_MS;
+}

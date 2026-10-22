@@ -105,6 +105,7 @@
  */
 #include "arb.h"
 #include <arpa/inet.h>
+#include "net.h"
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -484,6 +485,17 @@ static int beaten(void)
     return 0;
 }
 
+/* Heard twice was still cheap: a sender that beacons many keys twice over fills the table with Echos that count, and a real one that joins then
+ * finds no room.  So no source address gets more than CAND_PER_ADDR places (an Echo has one key; the second covers one that lost its state and
+ * beacons a new key while its old one is still remembered), and keys never heard before are taken at most CAND_NEW_MAX a minute, from everyone
+ * together.  Neither ever pushes out a key that is in the table already.  The source address of a UDP broadcast proves nothing (it is made up as
+ * easily as the key): the first limit is against the easy flood from one host, the second against everything else. */
+#define CAND_PER_ADDR 2
+#define CAND_NEW_MAX  8
+#define CAND_NEW_MS   PACE(60000)
+static long long new_since, told_addr, told_rate;       /* CAND_NEW_MS window; when the log last said a key was refused */
+static int new_count;
+
 static int established(const struct cand *c, long long now)    /* heard twice, far enough apart, and lately */
 {
     return c->heard >= 2 && ago(c->seen, now, PEER_TTL_MS);
@@ -491,15 +503,32 @@ static int established(const struct cand *c, long long now)    /* heard twice, f
 
 /* NULL if there is no room: a key heard once may push out another heard once or one gone quiet, never an Echo that is established, so a
  * flood of made-up keys cannot push out the one that is really joining */
-static struct cand *cand(const uint8_t pub[32], long long now)
+static struct cand *cand(const uint8_t pub[32], uint32_t from, long long now)
 {
-    struct cand *old = NULL;
+    struct cand *old = NULL; int same = 0; char ip[16];
     for (int i = 0; i < NPEER; i++) {
         if (cands[i].seen && !memcmp(cands[i].pub, pub, 32)) return &cands[i];
+        same += cands[i].ip == from && ago(cands[i].seen, now, PEER_TTL_MS);
         if (!established(&cands[i], now) && (!old || cands[i].seen < old->seen)) old = &cands[i];
     }
     if (!old) return NULL;
-    memset(old, 0, sizeof *old); memcpy(old->pub, pub, 32);
+    if (same >= CAND_PER_ADDR) {
+        if (!ago(told_addr, now, CAND_NEW_MS)) {
+            told_addr = now; net_ntoa4(ntohl(from), ip);
+            fprintf(stderr, "arbitration: %s beacons more than %d keys: the others ignored\n", ip, CAND_PER_ADDR);
+        }
+        return NULL;
+    }
+    if (!ago(new_since, now, CAND_NEW_MS)) { new_since = now; new_count = 0; }
+    if (new_count >= CAND_NEW_MAX) {
+        if (!ago(told_rate, now, CAND_NEW_MS)) {
+            told_rate = now;
+            fprintf(stderr, "arbitration: more than %d new keys within a minute: the others ignored\n", CAND_NEW_MAX);
+        }
+        return NULL;
+    }
+    new_count++;
+    memset(old, 0, sizeof *old); memcpy(old->pub, pub, 32); old->ip = from;
     return old;
 }
 
@@ -640,7 +669,7 @@ static void on_packet(const uint8_t *p, size_t n, long long now, uint32_t ip)
             if (f && (!known || (flags & F_HELLO))) beacon(1);
             return;
         }
-        struct cand *c = cand(pub, now);
+        struct cand *c = cand(pub, ip, now);
         if (!c) return;                                 /* every slot is an established Echo */
         /* heard again: counts once it is CAND_MIN_MS after the first (Wi-Fi delivers a beacon twice now and then) */
         if (!c->heard || now - c->first >= CAND_MIN_MS) c->heard++;
