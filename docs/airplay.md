@@ -61,12 +61,17 @@ gives them: Music and Spotify do, a browser tab may not). To see them *in* the m
 media_player:
   - platform: universal
     name: Echo Dot
-    children: [media_player.echo_dot_3_d13244_media_player]
+    unique_id: echo_dot_3_d13244_universal
+    device_class: speaker
+    children:
+      - media_player.echo_dot_3_d13244_media_player
     attributes:
       media_title: sensor.echo_dot_3_d13244_airplay_title
       media_artist: sensor.echo_dot_3_d13244_airplay_artist
       media_album_name: sensor.echo_dot_3_d13244_airplay_album
 ```
+
+No `state:` under `attributes`: that line makes the combined player show "off" (it is meant for a switch that powers a TV on and off); without it the state follows the Echo's player.
 
 (The entity ids are yours: look them up on the Echo's device page.)
 
