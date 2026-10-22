@@ -166,6 +166,8 @@ static void on_connection(int up)
 {
     pthread_mutex_lock(&mu);
     connected = up; rxn = 0;
+    /* the press allowed the phone that was connected when it came, not whoever connects next */
+    if (!up && mode == M_LOST && st == ST_AUTHORIZED) { auth_until = 0; set_state(ST_AUTH_REQUIRED); }
     if (up) fprintf(stderr, "improv: a phone connected\n");
     else fprintf(stderr, "improv: the phone left\n");
     if (H && H->attention) H->attention(up && st == ST_AUTH_REQUIRED);
@@ -353,7 +355,8 @@ int improv_enable(int set)
 int improv_authorize(void)
 {
     pthread_mutex_lock(&mu);
-    int take = mode == M_LOST && st == ST_AUTH_REQUIRED;
+    /* only while a phone is connected: a press that came first would allow whoever connects within the minute */
+    int take = connected && mode == M_LOST && st == ST_AUTH_REQUIRED;
     if (take) {
         auth_until = mono() + AUTH_SECS;
         set_state(ST_AUTHORIZED);

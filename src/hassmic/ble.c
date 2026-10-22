@@ -558,7 +558,9 @@ static int writable(unsigned h, int cmd)
 static void gatts_rx(struct conn *c, const unsigned char *p, size_t n)
 {
     unsigned char r[ATT_MTU], t[16], v[512]; size_t mx = c->mtu, o = 0, tl, vl, w = 0; unsigned s, e, h; int err;
-    if (!n || !S) return;
+    /* Nothing longer than the MTU is a valid PDU, and answers echo requests (Prepare Write): one that is longer would overrun r.  Dropped, as a
+     * central that ignores the MTU deserves */
+    if (!n || n > c->mtu || !S) return;
     switch (p[0]) {
     case ATT_MTU_REQ:
         if (n >= 3) { unsigned m = u16(p + 1); c->mtu = m < 23 ? 23 : m < ATT_MTU ? m : ATT_MTU; }

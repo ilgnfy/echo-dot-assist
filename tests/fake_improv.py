@@ -315,6 +315,9 @@ def main():
         os.unlink(online)
         check(wait(lambda: ctl.adv["on"], 8), "set up, no network for a while: advertising")
         check(prot.ImprovServiceData.from_bytes(ctl.adv_fields()[0x16][2:]).state == prot.State.AUTHORIZATION_REQUIRED, "authorization required")
+        key(138, 1); key(138, 0); time.sleep(1.5)                        # a press with nobody connected: it would allow whoever connects next
+        check(prot.ImprovServiceData.from_bytes(ctl.adv_fields()[0x16][2:]).state == prot.State.AUTHORIZATION_REQUIRED,
+              "the action button with no phone connected authorizes nobody")
         ctl.connect(); phone = Phone(ctl); phone.discover()
         for n in cccd: phone.write(cccd[n], b"\x01\x00")
         phone.write(hd["rpc"], prot.WiFiSettingsCmd(b"Cafe", b"").as_bytes())
