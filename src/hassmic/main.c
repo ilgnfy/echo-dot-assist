@@ -2637,10 +2637,10 @@ int main(int argc, char **argv)
     pthread_t cap_t, play_t, ear_t;
     airplay_init();
     { pthread_t at; alarms_init(); if (!pthread_create(&at, NULL, alarm_thread, NULL)) pthread_detach(at); }
-    pthread_create(&cap_t, NULL, capture_thread, NULL);
-    pthread_create(&play_t, NULL, playback_thread, NULL);
-    pthread_create(&ear_t, NULL, earcon_thread, NULL);
-    { pthread_t vol_t; pthread_create(&vol_t, NULL, volume_led_thread, NULL); pthread_detach(vol_t); }
+    /* a core thread that does not start leaves a satellite that cannot hear, speak or ring: better not to run at all than to look alive */
+    if (pthread_create(&cap_t, NULL, capture_thread, NULL) || pthread_create(&play_t, NULL, playback_thread, NULL)
+        || pthread_create(&ear_t, NULL, earcon_thread, NULL)) { fprintf(stderr, "cannot start the core threads\n"); return 1; }
+    { pthread_t vol_t; if (pthread_create(&vol_t, NULL, volume_led_thread, NULL)) fprintf(stderr, "cannot start the volume thread\n"); else pthread_detach(vol_t); }
 
     static const struct button_handler buttons = { on_action, on_mute, on_volume, on_pair, on_hold, button_event };
     if (buttons_start(input, &buttons) < 0) fprintf(stderr, "buttons: %s not available\n", input);
