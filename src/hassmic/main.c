@@ -1932,15 +1932,22 @@ static float vol_db(int v)
     return db[i - 1] + (db[i] - db[i - 1]) * (v - at[i - 1]) / (at[i] - at[i - 1]);
 }
 
+/* AirPlay (airplay.c) keeps to its sender's slider: while it plays on the Echo's own speaker the Echo's volume does not scale it.  It counts as a source
+ * at 100, so the mixer runs at the top and AirPlay arrives as the sender sent it, with the whole band of the speaker under that slider, and
+ * everything else (replies, sounds, timers, calls) is turned down in our PCM from there, by the Echo's volume, exactly as with separate volumes. */
+static int airplay_full(void) { return airplay_playing() && speaker_mode == SPEAKER_NONE; }
+static int scaled_mix(void) { return vol_split || airplay_full(); }
+
 /* lock held: what a kind (VOL_*) plays at now, its own volume or the music's moved by its offset */
-static int kind_volume(int k) { return kinds[k].linked ? clamp100(core_volume() + kinds[k].offset) : kinds[k].level; }
+static int kind_volume(int k) { return !vol_split ? core_volume() : kinds[k].linked ? clamp100(core_volume() + kinds[k].offset) : kinds[k].level; }
 
 /* lock held: what everything is turned down from: the volume, or the loudest kind */
 static int loudest(void)
 {
     int v = core_volume();
-    if (!vol_split) return v;
-    for (int k = 0; k < VOL_KINDS; k++)       /* a call's volume only while one is on: no hidden loud one moves the rest */
+    if (!scaled_mix()) return v;
+    if (airplay_full()) v = 100;
+    if (vol_split) for (int k = 0; k < VOL_KINDS; k++)       /* a call's volume only while one is on: no hidden loud one moves the rest */
         if ((k != VOL_CALLS || atomic_load(&dropin_live)) && kind_volume(k) > v) v = kind_volume(k);
     return v;
 }
@@ -1951,7 +1958,7 @@ static int mix_target(void) { return speaker_mode == SPEAKER_ABSOLUTE ? 100 : lo
 /* lock held: what audio for volume v is multiplied by: 1 at the mixer's own, 0 at volume 0 */
 static float mix_gain(int v)
 {
-    if (!vol_split) return 1;
+    if (!scaled_mix()) return 1;
     return v <= 0 ? 0 : powf(10.0f, (vol_db(v) - vol_db(loudest())) / 20.0f);
 }
 
@@ -1965,12 +1972,15 @@ static void mix_apply(void)                  /* lock held: the mixer's volumes a
     if (spk >= 0 && spk != spk_was) fprintf(stderr, "volume: the speaker at %d\n", spk);
     spk_was = spk;
     a2dp_speaker_volume(loudest());
-    audio_music_gain(mix_gain(core_volume()));
+    audio_music_gain(airplay_full() ? 1.0f : mix_gain(core_volume()));       /* AirPlay: the sender's slider, not the Echo's volume */
     audio_tts_gain(mix_gain(tts_media ? core_volume() : kind_volume(VOL_ASSISTANT)));
     atomic_store(&sounds_q16, (int)lroundf(mix_gain(kind_volume(VOL_SOUNDS)) * 65536));
     atomic_store(&timers_q16, (int)lroundf(mix_gain(kind_volume(VOL_TIMERS)) * 65536));
     audio_call_gain(mix_gain(kind_volume(VOL_CALLS)));
 }
+
+/* airplay.c, with no lock held: AirPlay began or ended playing, and with it who the mixer is turned down from */
+void core_airplay_changed(void) { pthread_mutex_lock(&core_lock); mix_apply(); pthread_mutex_unlock(&core_lock); }
 
 static void tts_kind(int media)              /* the playback thread, at each start of the TTS stream */
 {

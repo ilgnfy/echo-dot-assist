@@ -18,10 +18,12 @@ AirPlay 2 speakers through the clock nqptp shares.
 Ports: RTSP 28933, and 28940-28979 for everything shairport-sync opens per session (event, data, control and audio ports, TCP and UDP), all in
 the range the firewall admits already. Stock shairport-sync binds those as "any port", i.e. 40000-60000 (51722, 47902 seen): patch 2
 (`0002-ports-in-range.patch`) takes them from `udp_port_base`'s range, one after another.
-Name: the Echo's name ("Echo Dot 3 5695c4"). The sender's volume slider is ignored (`ignore_volume_control = yes`): applied by shairport-sync in software on top of the Echo's volume it was a second,
-unpredictable stage. The loudness is the Echo's volume (buttons, Home Assistant, the separate volumes, as for every music source) and the setting "AirPlay gain"
-(0 to +12 dB, +6 by default, on AirPlay's audio only, with a tanh limiter above 2/3 of full scale): music is mastered quieter than a spoken reply, so without it the Echo's
-volume had to go so far up that the voice assistant was too loud.
+Name: the Echo's name ("Echo Dot 3 5695c4"). **Volume**: the sender's slider is the volume of AirPlay, over the Echo's whole range: 100 % on the phone is the Echo at its loudest
+(shairport-sync applies the slider in software, -30..0 dB). The Echo's own volume (buttons, Home Assistant) does **not** scale AirPlay while it plays on the Echo's speaker;
+it is the volume of the replies, sounds, timers and calls. How: while AirPlay plays, `main.c` `airplay_full()` counts it as a source at 100, so the mixer runs at the top and
+everything else is turned down in our PCM from there by the Echo's volume curve, exactly as with "separate volumes" (`mix_apply`); AirPlay's music gain stays 1. It stops
+counting when AirPlay stops, and with a Bluetooth speaker as the output (its own volume rules there). "AirPlay gain" (0 to +12 dB, 0 by default, with a tanh limiter) is an extra
+boost for a quiet source.
 
 The configuration is generated (`state/airplay.conf`). Two things in it matter and cost an evening each: `output_format`/`output_rate` are read from the
 `pipe` section, not `general` (from `general` they are ignored and AirPlay 2 gives S32 at 48 kHz: static), and the reader must keep the bytes of a

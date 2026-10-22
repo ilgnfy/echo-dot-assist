@@ -4,7 +4,7 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-22
 
-- **AirPlay volume**: the sender's volume slider no longer changes anything (AirPlay always arrives at full level, whoever sends), and the new setting "AirPlay gain" (0 to +12 dB, +6 by default) makes AirPlay louder than the Echo's volume alone, with a limiter against distortion. So the Echo's volume can stay where the voice assistant is comfortable.
+- **AirPlay volume**: the volume slider of the phone or Mac is AirPlay's volume, over the Echo's whole range, and the Echo's own volume (buttons, Home Assistant) no longer scales it while it plays on the Echo's speaker: that volume is for the voice assistant's replies, sounds and timers. A new setting "AirPlay gain" (0 to +12 dB, 0 by default, with a limiter) lifts a quiet source.
 
 - **The satellite core cannot be stalled as easily** (from the original): a media stop while a reply is still being fetched no longer silences every reply after it until a restart; the reply queue is bounded; helper tools get a deadline; the Echo asks the volume service one question every 2 s instead of three; the sound thread sleeps instead of waking 50 times a second; Improv's button press only counts for a phone that is connected.
 

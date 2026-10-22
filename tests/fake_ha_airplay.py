@@ -37,14 +37,20 @@ async def main(e):
     import struct
     raw = open(MUSIC, "rb").read(); samples = struct.unpack(f"<{len(raw) // 2}h", raw[:len(raw) // 2 * 2])
     peak = max(abs(v) for v in samples)
-    check(e.pv("airplay_gain") == 6 and 15000 < peak < 17000, f"AirPlay gain: +6 dB by default, the stand-in's 8000 arrives as {peak} (limiter above 22000)")
-    check("ignore_volume_control = \"yes\"" in open(conf).read(), "the sender's volume slider is ignored (always full level)")
+    check(e.pv("airplay_gain") == 0 and 7500 < peak < 8500, f"AirPlay gain 0 by default: the stand-in's 8000 arrives as {peak}")
+    check("ignore_volume_control = \"no\"" in open(conf).read(), "the sender's slider is AirPlay's volume (shairport-sync applies it)")
+    # while it plays, the Echo's volume (40) does not scale it: the mixer is at the top, AirPlay's gain 1, the replies turned down from there
+    rd = lambda n: int(open(os.path.join(MIXER, n)).read())
+    await until(lambda: rd("MainVolume") == 100 and rd("TTSVolume") == 100, 5)
+    check(rd("MainVolume") == 100 and rd("TTSVolume") == 100, f"playing: the mixer at the top ({rd('MainVolume')}, {rd('TTSVolume')}), not at the Echo's volume 40")
     # a gap ends the stream; played again it starts again
     os.unlink(conf + ".play")
     await asyncio.sleep(2.5)
     sz2 = os.path.getsize(MUSIC)
     await asyncio.sleep(1.0)
     check(os.path.getsize(MUSIC) == sz2, "a pause of the sender ends the stream: nothing more is written")
+    await until(lambda: rd("MainVolume") == 40 and rd("TTSVolume") == 40, 5)
+    check(rd("MainVolume") == 40 and rd("TTSVolume") == 40, f"AirPlay stopped: the mixer back at the Echo's volume ({rd('MainVolume')}, {rd('TTSVolume')})")
     # another source starts: the sender is dropped, the receiver restarts
     open(conf + ".play", "w").close()
     await until(lambda: os.path.getsize(MUSIC) > sz2 + 44100 * 4 * 0.5, 10)
@@ -60,5 +66,8 @@ async def main(e):
           "switched off: the receiver stops and its mDNS records are gone")
 
 
+MIXER = tempfile.mkdtemp()                       # the mixer's volumes (HASSMIC_FAKE_MIXER): the Echo's volume is 40
+for _n in ("MainVolume", "TTSVolume"): open(os.path.join(MIXER, _n), "w").write("40\n")
+
 run(main, (PORT, HTTP_PORT, WEB, HTTPS_PORT, SELF_PORT),
-    {"HASSMIC_SHAIRPORT": f"{ROOT}/tests/fake_shairport.py", "HASSMIC_AVAHI_DIR": AVAHI, "HASSMIC_MUSIC": MUSIC})
+    {"HASSMIC_FAKE_MIXER": MIXER, "HASSMIC_SHAIRPORT": f"{ROOT}/tests/fake_shairport.py", "HASSMIC_AVAHI_DIR": AVAHI, "HASSMIC_MUSIC": MUSIC})

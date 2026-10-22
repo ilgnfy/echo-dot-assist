@@ -45,7 +45,7 @@
 #define OUT_LATENCY_MS 70
 #define FIFO_BYTES 4096             /* the pipe's own buffer: 23 ms, so its fill is not a latency of its own (the default 64 KB would be 370 ms) */
 static atomic_int enabled, delay_ms, playing, yield_req, conf_total_ms;
-static atomic_int gain_db = 6;       /* dB: see apply_gain */
+static atomic_int gain_db;           /* dB: see apply_gain */
 static atomic_int child_pid;
 static char fifo_path[300], conf_path[300];
 
@@ -80,9 +80,8 @@ static int total_ms(void)
 }
 int airplay_gain(int set) { if (set != INT_MIN) atomic_store(&gain_db, set < 0 ? 0 : set > 12 ? 12 : set); return atomic_load(&gain_db); }
 
-/* AirPlay's own boost, in dB, on top of the Echo's volume (which the voice assistant shares): sources are mastered quieter than a spoken reply, so
- * the music needed the Echo's volume so far up that the assistant was too loud.  Peaks over 2/3 of full scale are folded with tanh instead of
- * wrapping or clipping hard. */
+/* An optional boost for AirPlay alone, in dB (0 by default): the sender's slider sets the loudness, over the Echo's whole range (main.c airplay_full),
+ * and a quiet source can still be lifted here.  Peaks over 2/3 of full scale are folded with tanh instead of wrapping or clipping hard. */
 static void apply_gain(void *buf, size_t n)
 {
     int g = atomic_load(&gain_db);
@@ -112,7 +111,7 @@ static int write_conf(void)
     fprintf(f.f,
         "general = {\n  name = \"%s\";\n  port = %d;\n  udp_port_base = %d;\n  udp_port_range = %d;\n  output_backend = \"pipe\";\n"
         "  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
-        "  ignore_volume_control = \"yes\";\n};\n"
+        "  ignore_volume_control = \"no\";\n};\n"
         "pipe = {\n  name = \"%s\";\n  output_format = \"S16\";\n  output_rate = %d;\n  output_channels = 2;\n};\n"   /* the backend's own section: from general they are ignored and AirPlay 2 gives S32 at 48 kHz */
         "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
         "diagnostics = {\n  log_verbosity = 2;\n};\n",
@@ -188,6 +187,7 @@ static void *reader(void *arg)
     static char buf[4096];
     size_t have = 0;                        /* bytes of a frame the last read ended in the middle of: dropping them would shift every sample after */
     int fd = -1, open_music = 0, sized = 0;
+    long long last_data = 0;                /* now_ms of the last audio: a writer that left (HUP) ends the stream after the same gap */
     (void)arg;
     thread_name("airplay-audio");
     for (;;) {
@@ -198,12 +198,13 @@ static void *reader(void *arg)
         if (r > 0 && (p.revents & POLLIN)) {
             ssize_t n = read(fd, buf + have, sizeof buf - have);
             if (n > 0 && atomic_load(&enabled)) {
+                last_data = now_ms();
                 size_t total = have + (size_t)n, whole = total - total % (2 * CHANNELS);
                 have = total - whole;
                 n = (ssize_t)whole;
                 if (!open_music) {
                     if (music_open(RATE, CHANNELS)) { usleep(200000); continue; }
-                    open_music = 1; atomic_store(&playing, 1); core_music(MUSIC_AIRPLAY, 1);
+                    open_music = 1; atomic_store(&playing, 1); core_music(MUSIC_AIRPLAY, 1); core_airplay_changed();
                     fprintf(stderr, "airplay: playing\n");
                 }
                 while (music_queued_us() > MIXER_TARGET_US && !atomic_load(&yield_req)) usleep(5000);
@@ -212,9 +213,12 @@ static void *reader(void *arg)
             } else if (n == 0) usleep(100000);          /* the writer left: poll reports HUP at once while no writer is there */
             continue;
         }
-        if (r > 0 && (p.revents & (POLLHUP | POLLERR))) { usleep(200000); continue; }       /* no writer yet */
+        if (r > 0 && (p.revents & (POLLHUP | POLLERR))) {                   /* no writer (yet, or any more) */
+            usleep(200000);
+            if (!(open_music && now_ms() - last_data > GAP_MS)) continue;
+        }
         if (open_music) {                                                   /* a gap */
-            music_close(); open_music = 0; have = 0; atomic_store(&playing, 0); core_music(MUSIC_AIRPLAY, 0);
+            music_close(); open_music = 0; have = 0; atomic_store(&playing, 0); core_music(MUSIC_AIRPLAY, 0); core_airplay_changed();
             fprintf(stderr, "airplay: stopped\n");
         }
     }
