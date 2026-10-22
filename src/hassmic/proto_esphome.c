@@ -137,7 +137,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_ALARM_ON, KEY_ALARM_TIME = KEY_ALARM_ON + ALARM_SLOTS, KEY_ALARM_REPEAT = KEY_ALARM_TIME + ALARM_SLOTS,
        KEY_ALARM_STOP = KEY_ALARM_REPEAT + ALARM_SLOTS, KEY_ALARM_SNOOZE, KEY_ALARM_RINGING, KEY_ALARM_EVENT, KEY_ALARM_NEXT,
        KEY_MEM_USED, KEY_MEM_AVAIL, KEY_LOAD, KEY_SELF_CPU, KEY_SELF_RSS, KEY_TOP, KEY_THREADS, KEY_LAST_KILL, KEY_KILL_SERVICE, KEY_AIRPLAY, KEY_IMPROV };
-enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_PAUSE = 1, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
+enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_PLAY = 0, MP_CMD_PAUSE = 1, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
 /* Several API clients at a time, like ESPHome firmware: Home Assistant plus e.g. a debugging client.  Replies go to the
@@ -1061,12 +1061,12 @@ static int job_aborted(struct media_job *job)
 static void send_mp_state(void)         /* lock held */
 {
     PB(b, 32);
-    pb_fixed32(&b, 1, MP_KEY); pb_uint(&b, 2, media_playing || airplay_playing() ? MP_PLAYING : MP_IDLE); pb_float(&b, 3, core_volume() / 100.0f);
+    pb_fixed32(&b, 1, MP_KEY); pb_uint(&b, 2, media_playing || core_music_active() ? MP_PLAYING : MP_IDLE); pb_float(&b, 3, core_volume() / 100.0f);
     send_state(MEDIA_PLAYER_STATE, &b);
 }
 
-/* AirPlay began or ended playing (core_airplay_changed): the entity is "playing" while it does, so an automation or a voice command ("stop the music"
- * finds the media player that is playing) sees it, and its pause and stop drop the sender (on_mp_command) */
+/* A music source began or ended playing: the entity is "playing" while one does, so an automation or a voice command ("stop the music" finds the media
+ * player that is playing) sees it, and its pause and stop reach it (on_mp_command) */
 void esphome_media_changed(void) { send_mp_state(); }
 
 static int http_get_host(const char *host, const char *port, const char *path)
@@ -1616,7 +1616,10 @@ static void on_mp_command(const unsigned char *p, const unsigned char *end)
         case 9: announcement = f.v != 0; break;        /* tts.speak and play_media's announce: speech, not music */
     }
     if (has_vol) core_set_volume((int)(vol * 100 + 0.5f));
-    if (has_cmd && (cmd == MP_CMD_STOP || cmd == MP_CMD_PAUSE) && airplay_playing()) airplay_yield();      /* AirPlay has no pause to ask for: the sender is dropped */
+    /* the one media player for everything the Echo plays: pause and stop pause the music (Sendspin, Bluetooth; AirPlay's sender is dropped, it has no
+     * pause to ask for), play resumes what that paused */
+    if (has_cmd && (cmd == MP_CMD_STOP || cmd == MP_CMD_PAUSE)) core_music_pause();
+    if (has_cmd && cmd == MP_CMD_PLAY && !has_url) core_music_resume();
     if (has_cmd && cmd == MP_CMD_STOP && media_playing) core_tts_flush();
     if (has_cmd && cmd == MP_CMD_STOP) core_alarm_stop("media player stop");     /* as "Stop ringing" does, for automations */
     if (has_url && url[0]) media_start("", url, 0, 0, 0, !announcement);

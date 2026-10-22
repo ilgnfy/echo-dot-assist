@@ -71,7 +71,10 @@ extern int core_local_wake, core_port, core_sendspin_port, core_web_port;
  * wins" has to mean the one that connected last, not the one whose thread got there last */
 unsigned long long core_conn_seq(int fd);
 void esphome_media_changed(void);              /* proto_esphome.c: the media player's state may have changed; lock held */
-void core_airplay_changed(void);                /* airplay.c: it began or ended playing; no lock held */
+void core_airplay_changed(void);
+int  core_music_active(void);                   /* a music source (Sendspin, Bluetooth, AirPlay) plays */
+int  core_music_pause(void);                    /* Home Assistant's media player: pause what plays ("stop"); 1 = something was paused.  Lock held */
+int  core_music_resume(void);                   /* ... and resume what that paused (the action button's way); 1 = something was resumed.  Lock held */                /* airplay.c: it began or ended playing; no lock held */
 
 /* lock held, except core_state: any thread may read it without the lock as a snapshot (the music players duck by it
  * every 10 ms and must not wait behind the volume helpers that hold the lock); acting on it needs the lock */

@@ -228,6 +228,7 @@ static atomic_int state_seen;                       /* needs no core_lock */
 static atomic_int streaming, trigger_pending, button_pending, pair_pending, stop_pending, quit;
 static atomic_int alarm_on;   /* barge-in: drop queued TTS; a finished timer rings */
 static atomic_int busy;                             /* state != IDLE, for threads without the lock (the ring pauses) */
+static atomic_int mp_dirty;                          /* a music source began or ended: the media player's state is to be sent again */
 static atomic_int tts_on, music_on;                 /* something plays: the wake word model lowers its threshold then.
                                                     * music_on: MUSIC_* bits */
 /* 64 bits: a long is 32 on the Echo, and 32 000 bytes/s pass 2^31 after 18.6 h.  It went negative, cap_clock() made
@@ -1703,6 +1704,18 @@ void core_music(int source, int on)
     }
     if (!on && source != MUSIC_BLUETOOTH && was & source) a2dp_unyield();
     if (!was != !atomic_load(&music_on)) playback_hint();
+    if (was != atomic_load(&music_on)) atomic_store(&mp_dirty, 1);     /* the media player entity says so: the 200 ms thread tells Home Assistant */
+}
+
+int core_music_active(void) { return atomic_load(&music_on) != 0; }
+
+/* Home Assistant's media player: pause or stop pauses whatever plays (the same as "<wake word>, stop"), play resumes what that paused (the same as the
+ * action button). Lock held */
+int core_music_pause(void) { return music_stop(); }
+int core_music_resume(void)
+{
+    if (atomic_load(&music_on)) return 0;
+    return a2dp_button(1) || (core_sendspin_port && sendspin_button());
 }
 
 static void earcon_started(void) { earsup_started(cap_clock()); }     /* the earcon thread: the mixer took a sound */
@@ -2343,6 +2356,7 @@ static void *volume_led_thread(void *arg)
     (void)arg;
     while (!atomic_load(&quit)) {
         if (tick++ % 10 == 0) { volume_sync(tick % 300 == 1); music_volume_write(); }      /* 2 s; full every minute, first at start */
+        if (atomic_exchange(&mp_dirty, 0)) { pthread_mutex_lock(&core_lock); if (proto == &proto_esphome) esphome_media_changed(); pthread_mutex_unlock(&core_lock); }
         fake_speaker();                                 /* tests only: at once, as btout.c tells it on the Echo */
         long long at = atomic_load(&vol_clear_at);
         if (at && mono_ms() >= at) {
