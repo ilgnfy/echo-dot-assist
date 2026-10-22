@@ -10,6 +10,9 @@ struct improv_hooks {
 
 /* Advertises whenever the Echo needs it (improv.c says when); one thread.  Nothing without a Bluetooth controller */
 void improv_start(const struct improv_hooks *h);
+/* The switch "Wi-Fi setup over Bluetooth" (on by default): off, the Echo never advertises (a phone that is already connected is finished).
+ * set -1: ask.  Returns the state */
+int  improv_enable(int set);
 /* Action button: 1 if Improv waits for it (an Echo that is set up, without a network), the press is taken */
 int  improv_authorize(void);
 #endif

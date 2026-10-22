@@ -22,7 +22,7 @@ Hardening of the root side (`main.sh`, `tests/boot_test.sh`), Sendspin, Bluetoot
 | **Task manager**: CPU, memory, load, top processes, last kill; kill through root | `taskmgr.c`, `scripts/top.sh`; entities "Memory used/available", "Load average", "Top processes", "Last kill" | being ported |
 | Bluetooth AAC switch (off by default) | `a2dp_codecs.c`, entity "Bluetooth AAC" | the fork always offers AAC; switch being ported |
 | Bluetooth proxy: secure pairing only (off by default) | `ble.c`, entity "Bluetooth proxy: secure pairing only" | being ported |
-| "Wi-Fi setup over Bluetooth" switch | `improv.c` | the fork's Improv is automatic (offline 20 s / button), no switch |
+| "Wi-Fi setup over Bluetooth" switch | `improv.c` | **ported** (2026-10-22): the fork's Improv stays automatic, the switch turns it off |
 | Alexa on without a reboot | `scripts/alexa-on.sh` | not wanted any more (cloud-free) |
 | Network hardening: adb for the signer only, Wyoming allowlist, push-port back-off, arbitration limits, bounded network peers, Sendspin/Bluetooth hardening against hostile peers, core locking and liveness fixes | many files, `fix:` commits of 2026-10-05 | **to review and port**, not features but safety |
 | Downgrade protection for release-signed bundles | `ota.c`, `main.sh` | not needed: the fork trusts only the owner's key |
@@ -59,7 +59,7 @@ Hardening of the root side (`main.sh`, `tests/boot_test.sh`), Sendspin, Bluetoot
 | Illuminance | yes | when on | when on |
 | Alarm 1-3, Alarm ringing, Next alarm, Snooze alarm, Stop alarm | yes | **no** | being ported |
 | Memory used / available, Load average, Top processes, Last kill | yes | no | being ported |
-| Bluetooth AAC, Bluetooth proxy: secure pairing only, Wi-Fi setup over Bluetooth | yes | no | being ported |
+| Bluetooth AAC, Bluetooth proxy: secure pairing only, Wi-Fi setup over Bluetooth | yes | no | **yes again** |
 | Firmware (update, with an install button) | yes | yes | a text sensor with the version (online updates removed) |
 | Online updates (select) | yes | page only | **removed** (GitHub) |
 | Last request whispered | yes | when a model was there | **removed** (needed Amazon's download) |

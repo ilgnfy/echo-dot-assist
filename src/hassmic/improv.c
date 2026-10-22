@@ -37,6 +37,7 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -312,6 +313,7 @@ static void *worker(void *arg)
             else if (!on && !core_oobe() && now - offline_since >= OFFLINE_LOST) want = M_LOST;
             else want = M_OFF;
         }
+        if (!improv_enable(-1) && !busy) want = M_OFF;                      /* switched off from Home Assistant or the page */
         if (want != mode) {
             mode = want;
             fprintf(stderr, "improv: %s\n", mode == M_OOBE ? "not set up and no network: advertising, open to any phone" :
@@ -339,6 +341,13 @@ void improv_start(const struct improv_hooks *h)
     if (times) sscanf(times, "%d %d %d %d", &OFFLINE_OOBE, &OFFLINE_LOST, &AUTH_SECS, &PROVISIONED_SECS);
     ble_serve(&server);
     if (!pthread_create(&t, NULL, worker, NULL)) pthread_detach(t);
+}
+
+int improv_enable(int set)
+{
+    static atomic_int on = 1;
+    if (set >= 0 && set != atomic_exchange(&on, set != 0)) fprintf(stderr, "improv: Wi-Fi setup over Bluetooth %s\n", set ? "on" : "off");
+    return atomic_load(&on);
 }
 
 int improv_authorize(void)
