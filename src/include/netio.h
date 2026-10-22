@@ -7,12 +7,13 @@
 #include <netinet/tcp.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 static inline int net_listen(int port)
 {
-    int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+    int s = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0), one = 1;
     struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = INADDR_ANY };
     if (s < 0) return -1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -24,7 +25,12 @@ static inline int net_accept(int s)
 {
     int c, one = 1;
     do c = accept(s, NULL, NULL); while (c < 0 && errno == EINTR);
-    if (c >= 0) setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    if (c < 0) return c;
+    /* hassmic starts tools (ledctrl, lipc, audio_manager) all the time; one that hangs would otherwise hold every client
+     * connection open past its close.  accept4 needs _GNU_SOURCE on the PC, and a tool started between these two calls only
+     * keeps this one socket a little longer. */
+    fcntl(c, F_SETFD, FD_CLOEXEC);
+    setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
     return c;
 }
 

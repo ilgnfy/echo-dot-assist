@@ -132,7 +132,7 @@ unsigned mdns_resolve4(const char *host)
     size_t qlen = 12 + l;
     q[qlen++] = 0; q[qlen++] = 1;                                               /* type A */
     q[qlen++] = 0x80; q[qlen++] = 1;                                            /* class IN, unicast response wanted */
-    int s = socket(AF_INET, SOCK_DGRAM, 0), bound = 0;
+    int s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0), bound = 0;
     if (s < 0) return 0;
     struct sockaddr_in me = { .sin_family = AF_INET };
     for (int i = 0; i < 20 && !bound; i++) {
@@ -190,6 +190,7 @@ static void mdns_forget(const char *host)
 int net_socket(int family, int type, int protocol)
 {
     gid_t r, e, s; int fd;
+    type |= SOCK_CLOEXEC;                       /* not into the tools hassmic starts (netio.h) */
     if (getresgid(&r, &e, &s) || r == e) return socket(family, type, protocol);
     setfsgid(r);
     fd = socket(family, type, protocol);

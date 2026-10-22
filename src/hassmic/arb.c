@@ -167,6 +167,11 @@ static long long pace = 1000;                          /* per mille */
 #define SCAN_N       12         /* ...this many times in a row, then every SCAN_SLOW_MS (an Echo HA never confirms, a
                                  * forger's beacons: no endless stream of scans in HA's logbook) */
 #define SCAN_SLOW_MS PACE(300000)
+/* Beacons are unauthenticated: a forged one with a fresh public key each time makes a candidate, and each costs an X25519, Home Assistant reads
+ * and, after ATTEST_WAIT_MS, an action.  An Echo is handled only once heard twice at least CAND_MIN_MS apart (a joining one beacons every 20-40 s
+ * after its first seconds), and all hand-overs together happen at most every PUSH_GAP_MS. */
+#define CAND_MIN_MS PACE(9000)
+#define PUSH_GAP_MS PACE(5000)
 #define GIVE_MS PACE(5000)          /* hand K on the LAN to an Echo HA confirmed this often, until it is in */
 #define ATTEST_WAIT_MS PACE(30000)  /* no tag confirmed for a newcomer by then: hand K through its action instead.  A tag
                                     * takes a read, a scan (within SCAN_MS) and a read again; the action would raise a
@@ -214,7 +219,9 @@ static struct cand {                                    /* Echos outside our net
     char tag0[48];                                      /* its tag's state at our first read ("": no answer yet) */
     uint32_t ip;                                        /* where its beacons come from (network byte order), for the settings page */
     long long seen, first, pushed, gave, polled;        /* pushed: through the action; gave: on the LAN */
+    int heard;                                          /* beacons that count (CAND_MIN_MS apart); 2 make it established */
 } cands[NPEER];
+static long long push_last;                             /* the last hand-over to anyone (PUSH_GAP_MS) */
 static struct push { char node[NLEN], net[20], key[160]; } pushes[NPEER];     /* for Home Assistant, sent outside the lock */
 static int npush;
 static char polls[NPEER][TLEN];                  /* tags to ask Home Assistant for, outside the lock */
@@ -477,13 +484,21 @@ static int beaten(void)
     return 0;
 }
 
-static struct cand *cand(const uint8_t pub[32])
+static int established(const struct cand *c, long long now)    /* heard twice, far enough apart, and lately */
 {
-    struct cand *old = &cands[0];
+    return c->heard >= 2 && ago(c->seen, now, PEER_TTL_MS);
+}
+
+/* NULL if there is no room: a key heard once may push out another heard once or one gone quiet, never an Echo that is established, so a
+ * flood of made-up keys cannot push out the one that is really joining */
+static struct cand *cand(const uint8_t pub[32], long long now)
+{
+    struct cand *old = NULL;
     for (int i = 0; i < NPEER; i++) {
         if (cands[i].seen && !memcmp(cands[i].pub, pub, 32)) return &cands[i];
-        if (cands[i].seen < old->seen) old = &cands[i];
+        if (!established(&cands[i], now) && (!old || cands[i].seen < old->seen)) old = &cands[i];
     }
+    if (!old) return NULL;
     memset(old, 0, sizeof *old); memcpy(old->pub, pub, 32);
     return old;
 }
@@ -572,11 +587,12 @@ static void push(struct cand *c, long long now)
 {
     uint8_t blob[BLOB]; char k64[160];
     if (!in_net || (c->net && c->net <= net_id)) return;
+    if (!established(c, now) || ago(push_last, now, PUSH_GAP_MS)) return;
     if (c->attested) {
         struct pkt b;
         if (ago(c->gave, now, GIVE_MS) || seal(blob, c->pub)) return;
         if (!c->gave) fprintf(stderr, "arbitration: handing network %016llx to %s on the LAN\n", (unsigned long long)net_id, c->node);
-        c->gave = now;
+        c->gave = push_last = now;
         head(&b, T_GIVE); put(&b, c->pub, 32); put64(&b, net_id); put(&b, blob, BLOB);
         send_pkt(&b); send_pkt(&b);                     /* Wi-Fi drops broadcasts */
         crypto_wipe(&b, sizeof b); crypto_wipe(blob, sizeof blob);
@@ -584,7 +600,7 @@ static void push(struct cand *c, long long now)
     }
     if (ago(c->pushed, now, PUSH_MS) || !c->node[0] || now - c->first < ATTEST_WAIT_MS || npush == NPEER) return;
     if (seal(blob, c->pub)) return;
-    c->pushed = now;
+    c->pushed = push_last = now;                        /* also when the key is no good: it would only be tried again */
     b64_encode(blob, sizeof blob, k64, 0, 1);
     struct push *q = &pushes[npush++];
     snprintf(q->node, NLEN, "%s", c->node); snprintf(q->net, sizeof q->net, "%016llx", (unsigned long long)net_id);
@@ -624,7 +640,10 @@ static void on_packet(const uint8_t *p, size_t n, long long now, uint32_t ip)
             if (f && (!known || (flags & F_HELLO))) beacon(1);
             return;
         }
-        struct cand *c = cand(pub);
+        struct cand *c = cand(pub, now);
+        if (!c) return;                                 /* every slot is an established Echo */
+        /* heard again: counts once it is CAND_MIN_MS after the first (Wi-Fi delivers a beacon twice now and then) */
+        if (!c->heard || now - c->first >= CAND_MIN_MS) c->heard++;
         /* someone new may wait for our tag: the fast rate again, at most once per slow period (anyone on the LAN can
          * make up new keys, and each scan is a logbook entry in HA) */
         static long long sped;

@@ -8,7 +8,7 @@ import asyncio, os, socket, struct
 from aioesphomeapi import APIClient
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from arbecho import ARB, BCAST, SCAN, POLL, ATTEST_WAIT, DISCOVER, Echo, HA, Browser, check, until, start, run
+from arbecho import ARB, BCAST, SCAN, POLL, ATTEST_WAIT, DISCOVER, pace, Echo, HA, Browser, check, until, start, run
 
 # each already in a network of its own (as two Echos that started at the same moment would be): they merge
 a, b = Echo("Echo Kitchen", 16961, 500, net=5), Echo("Echo Living Room", 16962, 900, net=2)
@@ -22,7 +22,9 @@ async def main():
           "the Echo offers its \"arbitration_key\" action, and no ID entity")
     check("arbitration_handoff" not in a.by, "no \"Arbitration handoff\" entity any more")
     a.allowed = b.allowed = False                   # neither may run actions: the tags alone
-    ok = await until(lambda: a.st("arbitration_peers") == 1 and b.st("arbitration_peers") == 1, 20)
+    # an Echo is handed the key once heard twice (CAND_MIN_MS apart): up to two beacon intervals more than before
+    ok = await until(lambda: a.st("arbitration_peers") == 1 and b.st("arbitration_peers") == 1, 40)
+    await until(lambda: "moved to the older network" in a.text(), 10)
     check(ok and a.net() == b.net() and a.net().startswith("0000000000000002"), f"two networks merged into the older one: {a.net() and a.net()[:16]}")
     check({t for _, t in ha.scans} == {a.tag(), b.tag()} and all(t == {a.name: a, b.name: b}[n].tag() for n, t in ha.scans),
           "each Echo scanned its own tag: hassmic_<its public key>")
@@ -43,10 +45,15 @@ async def main():
     send = lambda p: tx.sendto(p, (BCAST, ARB))
     node = lambda s: bytes([len(s)]) + s.encode()
     net = a.net(); calls = len(ha.calls)
-    send(b"HMA1\x01" + xp + struct.pack("<Q", 0) + node("evil"))                      # outside any network: gets our key sent...
     xp2 = X25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    send(b"HMA1\x01" + xp2 + struct.pack("<Q", 0) + node(b.node))                     # ...or naming a real Echo, with its own key
-    send(b"HMA1\x01" + xp + struct.pack("<Q", 1) + node("evil") + struct.pack("<Q", 1) + os.urandom(16))   # "an older network"
+    def beacons():
+        send(b"HMA1\x01" + xp + struct.pack("<Q", 0) + node("evil"))                  # outside any network: gets our key sent...
+        send(b"HMA1\x01" + xp2 + struct.pack("<Q", 0) + node(b.node))                 # ...or naming a real Echo, with its own key
+        send(b"HMA1\x01" + xp + struct.pack("<Q", 1) + node("evil") + struct.pack("<Q", 1) + os.urandom(16))   # "an older network"
+    beacons(); await asyncio.sleep(pace(2))
+    check(len(ha.calls) == calls, "a beacon heard once: nothing handed over")
+    await asyncio.sleep(pace(9) + 0.3); beacons()                                       # as a joining Echo beacons again, CAND_MIN_MS later
+    for i in range(48): send(b"HMA1\x01" + os.urandom(32) + struct.pack("<Q", 0) + node(f"flood-{i}"))   # a flood: none heard twice, none pushes the two out
     la, lb = len(a.text()), len(b.text())
     ha.tags["hassmic_" + xp.hex()] = "2026-01-01T00:00:00.000+00:00"      # its tag, scanned once long ago (removed from HA since)
     send(b"HMA1\x06" + a.pub() + struct.pack("<Q", 1) + xp + os.urandom(72))    # "here is the older network's key"
