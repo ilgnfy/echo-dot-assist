@@ -74,9 +74,9 @@ static int write_conf(void)
     fprintf(f.f,
         "general = {\n  name = \"%s\";\n  port = %d;\n  udp_port_base = %d;\n  udp_port_range = %d;\n  output_backend = \"pipe\";\n"
         "  output_format = \"S16\";\n  output_rate = %d;\n  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
-        "  statistics = \"no\";\n  ignore_volume_control = \"no\";\n};\n"
+        "  ignore_volume_control = \"no\";\n};\n"
         "pipe = {\n  name = \"%s\";\n};\n"
-        "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 20;\n};\n",
+        "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n",
         core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, RATE, -atomic_load(&delay_ms) / 1000.0, fifo_path);
     return statefile_commit(&f);
 }
