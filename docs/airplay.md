@@ -55,28 +55,28 @@ The Echo's media player entity says *playing* while AirPlay plays (`core_airplay
 voice commands ("stop the music", "pause") and automations find it. Its pause and stop commands drop the AirPlay sender (`airplay_yield`: the phone shows
 "disconnected"; AirPlay has no pause that a receiver can ask for) and the entity goes idle at once. The entity itself carries no title, artist or cover art (ESPHome's media player has no field for them). Title, artist and album come from shairport-sync's metadata pipe (`apmeta.c`
 parses it; the cover art is not asked for) and are three text sensors beside it, "AirPlay title", "AirPlay artist" and "AirPlay album", while AirPlay is on and empty when nothing plays (not every sender
-gives them: Music and Spotify do, a browser tab may not). To see them *in* the media player card, Home Assistant's universal media player can put them on top of the Echo's player:
+gives them: Music and Spotify do, a browser tab may not). The sensors cannot be put *into* the media player entity: ESPHome's protocol has no field for them, and Home Assistant's "universal" media player does not help (its title, artist and album
+come from its child player only, never from sensors: `media_title` etc. in its `attributes` are ignored). A dashboard card shows them under the player instead (the ids are one Echo's, a room
+called Schlafzimmer; yours are in Developer tools -> States, filter `media_player.echo` and `airplay`):
 
 ```yaml
-media_player:
-  - platform: universal
-    name: Echo Dot Schlafzimmer
-    unique_id: schlafzimmer_echo_dot_3_d13244_universal
-    device_class: speaker
-    children:
-      - media_player.echo_dot_3_media_player
-    state_template: "{{ states('media_player.echo_dot_3_media_player') }}"
-    attributes:
-      media_title: sensor.schlafzimmer_echo_dot_3_d13244_airplay_title
-      media_artist: sensor.schlafzimmer_echo_dot_3_d13244_airplay_artist
-      media_album_name: sensor.schlafzimmer_echo_dot_3_d13244_airplay_album
+type: vertical-stack
+cards:
+  - type: media-control
+    entity: media_player.echo_dot_3_media_player
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: media_player.echo_dot_3_media_player
+        state: playing
+    card:
+      type: markdown
+      content: >
+        **{{ states('sensor.schlafzimmer_echo_dot_3_d13244_airplay_title') }}**
+
+        {{ states('sensor.schlafzimmer_echo_dot_3_d13244_airplay_artist') }}
+        · {{ states('sensor.schlafzimmer_echo_dot_3_d13244_airplay_album') }}
 ```
-
-`state_template` gives the combined player the Echo player's state (playing, idle) outright: without it, the universal player showed "off" while the Echo played. Do not use a `state:` attribute
-for this (it is meant for a switch that powers a TV on and off and also reads "off" here). The ids above are one Echo's (a room called Schlafzimmer); yours are in Home Assistant under Developer tools -> States
-(filter `media_player.echo` and `airplay`).
-
-
 
 ## Security
 
