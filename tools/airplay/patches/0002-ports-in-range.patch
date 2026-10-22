@@ -15,11 +15,11 @@ index cdf66b9..5b6df86 100644
    return ret;
  }
  
-+// The Echo admits inbound TCP only on 16384-32767: TCP ports that were "any port" (the AirPlay 2 event and data ports) come from the
-+// range of udp_port_base instead, one after another (TCP and UDP ports do not clash).
++// The Echo admits inbound ports only in 16384-32767: ports that were "any port" (the AirPlay 2 event, control and audio ports) come from the
++// range of udp_port_base instead, one after another.
 +int bind_socket_and_port(int type, int ip_family, const char *self_ip_address, uint32_t scope_id,
 +                         uint16_t *port, int *sock) {
-+  if (*port != 0 || type != SOCK_STREAM || config.udp_port_base == 0 || config.udp_port_range == 0)
++  if (*port != 0 || config.udp_port_base == 0 || config.udp_port_range == 0)
 +    return bind_socket_and_port_at(type, ip_family, self_ip_address, scope_id, port, sock);
 +  static unsigned next = 0;
 +  int ret = EADDRINUSE;
