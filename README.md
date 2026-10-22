@@ -17,6 +17,28 @@ as an ESPHome device, with no YAML and no add-on.
 > can brick the Echo. A mistake in the firewall or the updates could leave it online or open on your network. Read
 > what you run. No warranty, no support.
 
+## This fork compared with the original
+
+This is a fork of [0x0520/echo-dot-assist](https://github.com/0x0520/echo-dot-assist) (branch `cloud-free`). The full comparison, with commits and every entity, is in
+[docs/original-vs-fork.md](docs/original-vs-fork.md).
+
+**Changed**
+- **No Amazon cloud at all** on the Echo Dot 3: Amazon's services are removed (not just stopped), see [docs/cloud-free.md](docs/cloud-free.md). So online updates from
+  GitHub, the page's "Download from Amazon", the whisper detection and Alexa-on are gone; updates are pushed from your own PC with your own key.
+
+**Added**
+- **AirPlay 2** on the Echo itself (iPhone, iPad, Mac), in sync with other AirPlay 2 speakers and with video, as one more music source ([docs/airplay.md](docs/airplay.md); open to your network, no pairing).
+- A **settings page** (login by the action button, export/import, copying settings between Echos), a log viewer, light ring designs.
+- A second **wake word engine** (microWakeWord) and Home Assistant's, two wake words at once, a "Wake word" event.
+- **Drop In** calls between Echos, with a voice blueprint; **separate volumes**; a Home Assistant **light** for the ring; media over HTTPS; time zone from Home Assistant.
+- Smarter **arbitration** between Echos (learned window, Kiosk Satellite mode, joining without extra permissions).
+
+**Taken over from the original** (2026-10-22): the offline alarm clock, the task manager, the Bluetooth AAC and secure-pairing switches, the "Wi-Fi setup over Bluetooth"
+switch, the client write queue, and the original's root-side and network hardening.
+
+**Still missing from the original:** its core locking and liveness fixes (the satellite core cannot hang), and some arbitration and network limits against hostile devices
+on your LAN. They are safety work, not features; [the page above](docs/original-vs-fork.md#what-the-open-items-are) explains each.
+
 ## Supported Echos
 
 |    | Echo                         | Model  | Codename                               | Way in                                           |
@@ -44,6 +66,7 @@ how to add one: [`devices/`](devices/README.md).
 | Bluetooth speaker for your phone        | SBC                            | SBC, AAC, aptX, aptX HD                               |
 | Plays on a Bluetooth speaker            | ✅                             | ✅                                                    |
 | Bluetooth proxy for Home Assistant      | –                              | ✅                                                    |
+| AirPlay from iPhone, iPad, Mac          | ✅                             | ✅ AirPlay 2 [on the Echo Dot 3 itself](docs/airplay.md) |
 | Do not disturb, equalizer, ring brightness | Alexa app                   | [entities in Home Assistant](docs/GUIDE.md#in-home-assistant) |
 | Buttons and light ring in automations   | –                              | [an event and a light in Home Assistant](docs/GUIDE.md#buttons-and-light-ring) |
 | Light ring animations of your own       | –                              | [drawn on the settings page](docs/GUIDE.md#buttons-and-light-ring), for each of the Echo's |
@@ -52,7 +75,7 @@ how to add one: [`devices/`](devices/README.md).
 | Motion sensor                           | –                              | [from the Wi-Fi signal](docs/GUIDE.md#wi-fi-motion), experimental |
 | Wi-Fi setup from a phone                | Alexa app                      | [Home Assistant app](docs/GUIDE.md#setting-up-from-a-phone) |
 | Talks to Amazon                         | always                         | **never** (firewalled)                                |
-| Updates                                 | from Amazon, automatic         | [signed](#updating): from your PC, or from Home Assistant |
+| Updates                                 | from Amazon, automatic         | [signed](#updating): pushed from your PC (this fork: nothing is fetched from the internet) |
 
 The table is for the ESPHome mode (the default). The Echo can be a Wyoming satellite instead: voice, wake word,
 buttons and Music Assistant work, most of the rest does not ([details](docs/GUIDE.md#esphome-or-wyoming)).

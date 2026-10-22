@@ -11,13 +11,19 @@ AirPlay 2 speakers through the clock nqptp shares.
 | piece | where | what |
 |---|---|---|
 | `airplay.c` | hassmic | writes `state/airplay.conf`, runs shairport-sync as its child (restart 2 s, then 30 s after five quick exits), reads its audio from the FIFO `state/airplay.pipe` (mode 0600) into the music stream (S16 44.1 kHz stereo), 1.5 s without audio ends it |
-| shairport-sync `b991d91` | `devices/donut/prebuilt/airplay/` | AirPlay 2 receiver, FFmpeg decoders, output to the pipe; one patch (`tools/airplay/patches`): the "external-avahi" mDNS backend writes the stock avahi-daemon's service files (`airplay-raop.service`, `airplay-ap2.service` beside hassmic's own) with the text records AirPlay 2 needs |
+| shairport-sync `b991d91` | `devices/donut/prebuilt/airplay/` | AirPlay 2 receiver, FFmpeg decoders, output to the pipe; two patches (`tools/airplay/patches`): (1) the "external-avahi" mDNS backend writes the stock avahi-daemon's service files (`airplay-raop.service`, `airplay-ap2.service` beside hassmic's own) with the text records AirPlay 2 needs |
 | nqptp 1.2.9 | same | the PTP clock (UDP 319, 320; shared memory in `/dev/shm`); root's `main.sh` (`airplay_clock`, netwatch's 10 s loop) runs it only while `state/config` says `airplay=on` |
-| `lockdown.sh` | root | admits UDP 319 and 320 from private and link-local ranges, only while `airplay=on` (`airplay_state`, like Kiosk Satellite's port); `check` catches them left open |
+| `lockdown.sh` | root | admits UDP 319 and 320, over IPv4 and IPv6 (the Mac sends its clock from its IPv6 address), from private and link-local ranges, only while `airplay=on` (`airplay_state`, like Kiosk Satellite's port); `check` catches them left open |
 
-Ports: RTSP 28933, UDP 28940-28979 (shairport-sync's "any port" sockets), all in the range the firewall admits already.
+Ports: RTSP 28933, and 28940-28979 for everything shairport-sync opens per session (event, data, control and audio ports, TCP and UDP), all in
+the range the firewall admits already. Stock shairport-sync binds those as "any port", i.e. 40000-60000 (51722, 47902 seen): patch 2
+(`0002-ports-in-range.patch`) takes them from `udp_port_base`'s range, one after another.
 Name: the Echo's name ("Echo Dot 3 5695c4"). The sender's volume is applied by shairport-sync in software; hassmic's music
 volume (and the separate volumes) apply on top, as for every music source.
+
+The configuration is generated (`state/airplay.conf`). Two things in it matter and cost an evening each: `output_format`/`output_rate` are read from the
+`pipe` section, not `general` (from `general` they are ignored and AirPlay 2 gives S32 at 48 kHz: static), and the reader must keep the bytes of a
+frame a read ended in the middle of (dropping them shifts every later sample). Log verbosity 2 stays on: its lines go to `boot.log`.
 
 ## Why glibc, static
 
@@ -46,8 +52,19 @@ transient pairing). The receiver runs as the daemon's user, the clock as root: n
 Neither reaches the internet (firewall: the daemon's real group may reach local addresses and what hassmic fetches; root's nqptp
 answers peers only). Off: no process, no ports, no mDNS records.
 
+## Measured (2026-10-22, Echo Dot 3, AirPlay from a Mac)
+
+Idle with AirPlay on: nqptp 1 % + shairport-sync 0.7 % + the reader thread 1 % of one core (the Echo has four), 3 MB RSS, 6 MB less free RAM. Playing: shairport-sync 7.5 %,
+the mixer 75 -> 100 %, hassmic 75 -> 45 % (not understood), total load unchanged at 55-60 %, 11 MB RSS. Wake word and voice replies unaffected. The two programs are
+4.3 MB, stored twice (factory copy and update slot).
+
+## Not done
+
+No pairing (open to the LAN), no title, state or cover art in the media-player entity (the pipe output has no metadata), not tried with an iPhone or in a
+group with other AirPlay 2 speakers, no live latency report from the output (the delay is the sum of fixed numbers).
+
 ## Tests
 
 `tests/fake_ha_airplay.py` (`tests/fake_shairport.py` plays the receiver's part: reads the configuration, writes the records, a tone into the pipe):
 off by default, on from Home Assistant's link, configuration and ports, records, audio into the music stream, a gap, "stop", off.
-`tests/lockdown_test.sh`: the two ports. A real sender is needed for the rest (pyatv cannot: it times with NTP, AirPlay 2 receivers want PTP).
+`tests/lockdown_test.sh`: the two ports. A real sender is needed for the rest (pyatv cannot: it times with NTP, AirPlay 2 receivers want PTP): tried by hand with macOS, which is where the ports, IPv6 and format snags above showed.

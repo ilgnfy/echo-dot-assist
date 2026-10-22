@@ -324,6 +324,10 @@ and the action button pauses and resumes.
   until it is back (after 30 s, then less and less often, at most every 30 min). Where Music Assistant cannot see the
   Echo's announcements (another subnet or VLAN), add `<echo-ip>:28928` under its Sendspin provider's "Manual IP
   addresses for discovery": with the port, since a bare address means Sendspin's default 8928, which is not the Echo's.
+- **AirPlay 2** (iPhone, iPad, Mac): switch "AirPlay 2" on (Home Assistant or the settings page; off by default). The Echo then shows up in the AirPlay
+  list under its own name and keeps in step with other AirPlay 2 speakers and with video: it works out its own playback delay ("AirPlay delay" on the page
+  is only a trim, 0 by default). It is one more source like the others: the newest wins, "<wake word>, stop" disconnects the sender, and the Echo's volume,
+  equalizer and separate volumes apply. Anyone on your network can play to it ([security](SECURITY.md#airplay-2)). Details: [airplay.md](airplay.md).
 - **From a phone** over Bluetooth: SBC, aptX, aptX HD, and AAC once "Bluetooth phones: AAC" is on (off by default, see [security](SECURITY.md#bluetooth)),
   with media controls. Switch on "Bluetooth audio from phones" on the settings page; the "Bluetooth phones: pairing" switch in Home Assistant then lets phones
   pair (blue chaser on the ring). iPhones prefer AAC and use SBC without it.
@@ -424,6 +428,8 @@ While a phone plays, the proxy stops scanning: the radio cannot do both without 
 | Debug access (adb over Wi-Fi) | configuration: opens adb for 30 minutes for the network, only over the encrypted connection |
 | Bluetooth phones: AAC, Bluetooth proxy: secure pairing only | configuration, both off; turning them on / off the weaker way needs the encrypted connection |
 | Music Assistant without pairing | configuration: any Music Assistant on the network may play |
+| AirPlay 2 | configuration: the Echo as an AirPlay 2 speaker, see [Music](#music) |
+| Wi-Fi setup over Bluetooth | configuration, on by default: off, the Echo never advertises for a phone setup, see [Setting up from a phone](#setting-up-from-a-phone) |
 | Sound detection, Wi-Fi motion detection, Join arbitration network | the switches of the features below: the rest of a feature's entities appears while it is on |
 | SoC temperature, CPU usage | diagnostic, disabled by default |
 
@@ -562,6 +568,7 @@ ESPHome devices and the Voice PE are:
   already: the phone is for a reset, a new network, or an install by hand.
 - An Echo that is set up and lost its network for 10 minutes (new router, moved) advertises too, but takes a network
   only after a press of its action button (good for a minute).
+- The switch "Wi-Fi setup over Bluetooth" (Home Assistant, settings page; on by default) turns all of this off: the Echo then never advertises.
 - Improv sends the Wi-Fi password over Bluetooth **unencrypted**: that is the protocol, the same for every Improv
   device. Not with `-B` (Bluetooth off) in `ARGS`.
 

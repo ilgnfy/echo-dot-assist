@@ -9,7 +9,7 @@ What protects an Echo running hassmic, and where that ends. Nobody has audited a
 |---|---|
 | **Out** | Amazon's daemons: local addresses only, plus DNS to the servers DHCP hands out. `otad` and `ace_otad` (firmware updates): never. hassmic itself: anywhere, to fetch replies and music from where Home Assistant or Music Assistant point it. |
 | **In, TCP** | 16384–32767 only: 26053 ESPHome, 16700 Wyoming, 28928 Sendspin, 28929 updates, 28931 settings page |
-| **In, UDP** | 16384–32767 only (28930: arbitration between Echos, 28932: Drop In audio), and 2330 only while arbitration is in Kiosk Satellite mode (their fixed port) |
+| **In, UDP** | 16384–32767 only (28930: arbitration between Echos, 28932: Drop In audio, 28940–28979: AirPlay), and 2330 only while arbitration is in Kiosk Satellite mode (their fixed port), and 319 and 320 only while AirPlay 2 is on (its clock), from private and link-local addresses, IPv4 and IPv6 |
 | **In, ICMP** | ping (echo request) from private and link-local addresses only; answers to the Echo's own traffic |
 
 Put the Echo on a network without internet as a second layer.
@@ -89,6 +89,14 @@ while that mode is on.
 Installed only when signed with your `secrets/update.key` (pushed from your PC). Root checks
 the signature, with the tool and key from the system partition or the installed copy, before anything is unpacked.
 Your key also opens adb over Wi-Fi. The Echo fetches no update from the internet.
+
+## AirPlay 2
+
+Off by default. On, the Echo answers on TCP 28933 (RTSP), TCP and UDP 28940–28979 (a session's ports) and UDP 319/320 (the PTP clock), and announces itself by mDNS.
+**There is no pairing: anyone on your network can play to the Echo**, as with most AirPlay speakers. The receiver (shairport-sync) runs as the daemon's user and is
+bound by the same egress rules as hassmic; the clock (nqptp) runs as root, only reads UDP and writes shared memory, and the firewall admits its two ports from
+local address ranges only and only while the setting is on (`lockdown.sh check` catches them left open). Both are third-party C code fed by whatever the
+network sends them. Off: no process, no ports, no records. [airplay.md](airplay.md).
 
 ## Bluetooth
 

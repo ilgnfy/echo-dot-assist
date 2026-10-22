@@ -227,7 +227,7 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
 - **AirPlay 2** (`airplay.c`, `docs/airplay.md`, setting `airplay`, off by default): music source `MUSIC_AIRPLAY`. hassmic runs `shairport-sync` (static glibc ARM binary from `devices/donut/prebuilt/airplay/`, built by `tools/airplay/build.sh`; its patched
   "external-avahi" backend writes `airplay-raop.service`/`airplay-ap2.service` into the avahi services directory) as a child with a generated `state/airplay.conf`, ports 28933 and UDP 28940-28979; its pipe backend writes S16 44.1 kHz stereo to the FIFO
   `state/airplay.pipe`, which a thread plays on the music stream. The clock `nqptp` (UDP 319/320) is root's: `main.sh` `airplay_clock`, and `lockdown.sh` admits those ports from local ranges only while `state/config` says `airplay=on`. A newer source
-  or "stop" drops the sender (`airplay_yield`: the child restarts). Test: `tests/fake_ha_airplay.py` with `tests/fake_shairport.py`.
+  or "stop" drops the sender (`airplay_yield`: the child restarts). Test: `tests/fake_ha_airplay.py` with `tests/fake_shairport.py`.  Facts that cost time: shairport's `output_format`/`output_rate` must be in the `pipe` section; its "any port" sockets are patched into the UDP range (`tools/airplay/patches/0002`); nqptp's clock comes over IPv6 too (`lockdown.sh` admits 319/320 on both); the FIFO is 4 KB and the output delay is `airplay.c` `total_ms` (the setting is a trim); the reader keeps a partial frame between reads.
 - **Drop In** (`dropin.c`, `dropin.h`): calls between two Echos of the arbitration network. Signalling as signed
   `T_MSG` on arb's socket (`arb_tell`, `hooks->message`; invite/ringing/accept/refuse/bye), audio Opus 16 kHz 20 ms over
   unicast UDP 28932 (`-i`), per-call key from ephemeral X25519 + `arb_derive`. Playback on the mixer's `Voip` stream
@@ -326,7 +326,7 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   Assistant's voice assistant subscribed (`core_link` ready -> `state/adopted`; an existing `state/api_key` counts);
   stock's orange `setup-mode` spinner meanwhile (`core_oobe`).  `improv.c` = Improv Wi-Fi over BLE on `ble.c`'s peripheral role (advertising +
   a GATT server on one link, `conns[SRV]` beside the proxy's slots; `ble_serve`/`ble_advertise`/`ble_server_notify`):
-  advertises when not set up and offline 20 s (authorized), or set up and offline 10 min (the action button authorizes,
+  advertises (unless the switch "Wi-Fi setup over Bluetooth", setting `wifi_setup_bluetooth`, `improv_enable`, is off) when not set up and offline 20 s (authorized), or set up and offline 10 min (the action button authorizes,
   `improv_authorize` in `on_action`); Wi-Fi through `wifi.c` -> root's `wifi.sh` like the page's switch; no host name
   or device name commands (the Echo names itself).  `HASSMIC_IMPROV_TIMES`, `HASSMIC_FAKE_ONLINE`,
   `HASSMIC_HOLD_TIMES` (the hold stages), wifi.sh's `WIFI_STEP` (its looks) for tests.  Reset (`core_reset`: action

@@ -2293,73 +2293,27 @@ firewall admits 16384-32767) -> `patches/0002-ports-in-range.patch` takes them f
 Verbosity 2 of shairport-sync stays on (its log lines go to boot.log).  **Still open:** CPU/RAM while playing (`taskmgr`), an iPhone and a group with other AirPlay 2 speakers, the
 media-player entity does not show AirPlay as a source (no title/state), no metadata or cover art (shairport-sync can give them, the pipe backend does not).  The analysis below is from before the build.
 
-Analysis of 2026-10-21; nothing built.  Sources: shairport-sync's AIRPLAY2.md and BUILD.md, nqptp's README (fetched that day, their wording summarised),
-the device and the repo.  Things marked *check* are from memory or inferred and need a test before anyone relies on them.
+**Plan against result (2026-10-22).**  The analysis of 2026-10-21 (below in short) was written before anything was built; what differed:
 
-**Does it fit the audio design?  Yes, as one more music source.**  `audio.h` has `music_open/music_write/music_queued_us` (a mixer stream of its own,
-mixed with voice, which Sendspin uses) and `bt_*` (the A2DP sink); `main.c` `core_music(MUSIC_*, on)` makes the newest source win
-(a Bluetooth device that starts pauses Sendspin and the other way round, line 1609 on).  AirPlay would be `MUSIC_AIRPLAY = 4` feeding
-`music_*`, pausing the others when it starts.  What follows from that without new code: the voice assistant ducks and answers over it as over
-Sendspin; the music volume (and the separate-volumes settings, `audio_music_gain`) applies; "<wake word>, stop" pauses it
-(`stop_word`); and playing on a Bluetooth speaker works because the choice between the Echo's speaker and a Bluetooth speaker is made behind
-the music stream (`btout.c`, `core_speaker`), not by the source.  HA's media-player `play_media` stays as it is (it is music on the TTS
-stream).  Not free: the media-player entity would have to show AirPlay as a source (state/title), and the one-source-at-a-time rule must
-include it.
+| planned | result |
+|---|---|
+| one more music source, `MUSIC_AIRPLAY`, newest wins | as planned; volume, EQ, separate volumes, ducking, "stop", Bluetooth speaker route all come with the music stream |
+| bionic build against the firmware's libraries and its FFmpeg, "do not build FFmpeg" | static **glibc** binaries and our own libraries incl. a minimal FFmpeg (`tools/airplay`): bionic has no `pthread_cancel`/`shm_open`; nqptp needed no patch, root creates `/dev/shm` |
+| 2-4 MB | 4.3 MB (shairport-sync 3.8, nqptp 0.5), stored twice |
+| mDNS through avahi | a patch makes the "external-avahi" backend write service files |
+| firewall: 319/320 for root's nqptp, local ranges, only while on | done, plus **IPv6** (the Mac's clock comes from its ULA address; "No NQPTP master clock") and a second patch for shairport's event/data/control/audio ports (random in 40000-60000; now 28940-28979) |
+| pairing or password | **not done**: open to the LAN, said on the page and in SECURITY.md |
+| a backend of our own reporting the output's latency | the stock `pipe` backend; FIFO cut to 4 KB (the default 64 KB was 370 ms); the delay is the sum of fixed numbers (`total_ms`), the setting is a trim; lip sync right on a Mac (user), no sync measurement against a second AirPlay speaker yet |
+| 10-20 MB RAM (guess) | measured 3 MB idle, 11 MB playing; CPU 2.5 % of one core idle, 8 % playing; wake word and replies unaffected |
+| media-player entity shows AirPlay | **not done** (no state, title, cover art: the pipe backend has no metadata) |
+| fake sender in the tests | `tests/fake_shairport.py` stands in for the receiver; a real sender is macOS by hand (pyatv times with NTP, AirPlay 2 wants PTP) |
+| build with `make DEVICE=donut airplay` | `tools/airplay/build.sh` on Debian; the two binaries are committed under `devices/donut/prebuilt/airplay/` |
 
-**Environment on the Echo** (measured): MT8167B, quad Cortex-A35 (kernel aarch64 4.4.22, userland 32-bit armv7, bionic/API 24); 483 MB RAM
-with 385 MB available and 363 MB zram swap; `/system` 837 MB free, `/data` 1.4 GB free (space is not the limit, RAM is: hassmic ~29 MB, mixer ~23 MB).
-Firmware libraries present: `libavcodec`, `libavformat`, `libavutil`, `libswresample` (FFmpeg; the A2DP sink already loads its AAC decoder
-with dlopen), `libssl`/`libcrypto`, `libmbedtls`/`libmbedcrypto`, `libopus`, `libz`, `libsodium` and `libuuid` (in `/system/vendor/lib`),
-`libspeexresampler`, `libavahi-common`/`-core`.  Missing: `libplist`, `libgcrypt`, `libconfig`, `libpopt`, `libsoxr`, and **`libavahi-client`, which the
-cleanup deleted** (nothing on the Echo used it; restore it from the backup or build avahi's client library).  `/dev/shm` does not exist; bionic has no `shm_open` (*check*).
+What the real sender showed, in order (each one a test of the next): ports outside 16384-32767 blocked the connection ("could not connect"); then connected but silent
+(UDP ports); then "No NQPTP master clock" (IPv6); then static (`output_format` in the wrong section, and the reader dropping a partial frame); then the lip sync (FIFO).
 
-**What shairport-sync needs for AirPlay 2** (BUILD.md): build tools plus `libpopt`, `libconfig`, `libssl` (OpenSSL), `libsoxr`, `libplist`,
-`libsodium`, `libgcrypt`, `uuid`, `xxd`, FFmpeg's `libavutil/avcodec/avformat` with an AAC decoder that handles `fltp`, `libavahi-client` and a
-running `avahi-daemon`; `./configure --with-airplay-2 --with-ssl=openssl --with-avahi ...`; plus **NQPTP**, a second daemon for timing/sync that needs
-exclusive use of **UDP 319 and 320** and a POSIX shared-memory interface to shairport-sync.  Formats: S16/S24/F24 PCM, ALAC and AAC, 44.1 and 48 kHz,
-stereo (and 5.1/7.1).  AirPlay (classic) without AirPlay 2 needs neither NQPTP nor the PTP ports; it has no multi-room sync.
-
-**Hard problems, in order of size**
-1. **The firewall.** The INPUT policy admits only 16384-32767 (+ 5353, 2330 in kiosk mode).  319/320 are outside and also below 1024: NQPTP must run as
-   root, `lockdown.sh` needs rules for them (from private addresses only) and `docs/SECURITY.md` a paragraph.  Same for the RTSP port and the
-   UDP ports shairport-sync opens per session (configurable ranges; keep them inside 16384-32767).
-2. **Pairing/security.** AirPlay's default pairing is open to the LAN; use a password or HomeKit-style pairing and say so in the settings page.  A new
-   inbound service widens the attack surface that upstream's design keeps small.
-3. **NQPTP on bionic**: shared memory without `/dev/shm`/`shm_open` (ashmem or a file in `/dev/` instead, a patch to both daemons), raw timestamps.
-4. **mDNS**: `_airplay._tcp` and `_raop._tcp` records with changing TXT fields.  Either restore `libavahi-client` and let shairport talk to
-   `avahi-daemon` over D-Bus (dbus-daemon runs), or have hassmic write the service files itself as it does for ESPHome and restart avahi.
-5. **Output and latency.** The `pipe`/`stdout` backends are "for where timing is not crucial"; multi-room sync wants the latency of the output.  A small
-   backend of our own (a Unix socket into hassmic, reporting `music_queued_us` plus the mixer's latency) is the clean way; hassmic converts 44.1/48 kHz
-   to the stream's rate (the music stream takes the rate it is opened with).
-6. **RAM and CPU**: not measured.  An A35 decodes ALAC/AAC easily; the footprint of shairport-sync + nqptp + the FFmpeg decoder (shared, from the
-   firmware) is probably 10-20 MB (*guess*).
-
-**Building it from source for compatibility and small size** (the project's way: NDK r21e, armv7, API 24, bionic, linking the firmware's libraries)
-- Cross-build the missing libraries static, `-Os -flto`, only what is used: `libplist`, `libgcrypt` (or move that use to OpenSSL/libsodium), `libconfig`
-  (or none: hassmic writes shairport's configuration from its settings), `libpopt` (or none: hassmic starts it with arguments).  Already on the Echo:
-  `libsodium`, `libuuid` (link against the firmware's), `libspeexresampler` (instead of `libsoxr`).  TLS: OpenSSL static, stripped of unused ciphers
-  (2-3 MB), or the firmware's `libssl` after checking its version and ABI (*check*).
-- **Do not build FFmpeg.**  Load the firmware's `libavcodec`/`libavutil` with `dlopen` as `a2dp_codecs.c` already does for AAC; this is a patch to
-  shairport-sync's decoder code, saving about 10 MB and the build.
-- Expected size: shairport-sync + nqptp stripped and static, 2-4 MB (*guess*), shipped in the signed update bundle (`/data/local/hassmic/ota`) like hassmic
-  itself, not on the system partition.
-- Keep it out of the default build like the Wi-Fi motion module: `make DEVICE=donut airplay`, a setting that is off by default, entities only while on.
-- Licences: shairport-sync's own licence (an MIT-style text, check the file), nqptp GPL-2.0 (*check*; a separate process, so it stays separate), libplist
-  LGPL, libsodium ISC, OpenSSL Apache-2.0.  The repository's rule about `third_party` licences applies.
-
-**Results of 2026-10-22 (night)**
-- *Step 1 done on the PC* (Debian 13, x86-64): nqptp 1.2.9 (45 KB) and shairport-sync (`b991d91`, `--with-airplay-2 --with-ssl=openssl --with-avahi --with-pipe --with-metadata`, 709 KB)
-  build, start, and advertise `_airplay._tcp` (features `0x401C4A00,0x5C340`) and `_raop._tcp` on the LAN; nqptp makes `/dev/shm/nqptp`.  Not tried: a sender (needs an iPhone or Mac).
-- **Music Assistant already offers this Echo as an AirPlay target**: the LAN shows `E2B8E48EC398@Echo Dot 3 d13244 | Music Assistant` (`_raop._tcp`, port 7301 on Music Assistant's host,
-  `am=ShairportSync`): Music Assistant's own AirPlay receiver (classic AirPlay, no AirPlay 2), played on the Echo as a Sendspin player.  An iPhone or Mac can AirPlay to the Echo today,
-  through Music Assistant, with no code on the Echo.  What a native receiver would add: AirPlay 2 multi-room sync *with other AirPlay speakers* and no dependency on Music Assistant being up.
-- Build notes for the cross build: `--with-external-mdns` needs an `avahi-publish-service` (a shim of ours could write avahi's service file; the TXT fields change while playing);
-  without `--with-soxr` shairport uses its own interpolation (drop soxr); libgcrypt needs libgpg-error; `uuid` from util-linux; the firmware's FFmpeg is needed for headers of the exact version.
-- Decision pending (the owner): a native receiver is a multi-day cross-build and integration project (about eight libraries, a bionic patch for nqptp's shared memory, firewall
-  rules below 1024, a hassmic backend) whose main benefit Music Assistant already gives.
-
-**Order of work (size: large, roughly the Drop In feature's)**: (1) on the PC (Linux) build shairport-sync with AirPlay 2 and the `pipe` backend,
-play from an iPhone, confirm PCM flows and what NQPTP needs; (2) NDK cross-build of the libraries and both daemons, run by hand on the Echo
-inside a temporary firewall opening; (3) the backend into hassmic's music stream and `MUSIC_AIRPLAY`; (4) firewall, mDNS, settings and entities, SECURITY.md;
-(5) tests with a fake sender where possible, a sync measurement against another AirPlay speaker; (6) GUIDE, CHANGELOG.
-Do not start before the cloud clean-up is finished and purged.
+Analysis of 2026-10-21 in short.  Sources: shairport-sync's AIRPLAY2.md and BUILD.md, nqptp's README.  Needed: shairport-sync with `--with-airplay-2` plus nqptp
+(exclusive UDP 319/320, POSIX shared memory), libplist, libgcrypt, libconfig, popt, OpenSSL, libsodium, libuuid, FFmpeg's AAC and ALAC decoders and an mDNS
+announcement.  Hard problems in order: the firewall (319/320 are below 1024 and outside the admitted range, nqptp as root), security (AirPlay pairing is open
+to the LAN), shared memory without `/dev/shm`, mDNS records, the output backend and its latency, RAM and CPU.  Music Assistant already offers the Echo as a
+*classic* AirPlay target (no AirPlay 2 clock) and still does; the native receiver adds multi-room sync with other AirPlay 2 speakers and no dependency on Music Assistant.
