@@ -22,7 +22,7 @@ mkdir -p "$OUT"
 ( cd "$W/shairport-sync" && git checkout -q -f b991d91 && git apply "$HERE"/patches/*.patch &&
   { make distclean >/dev/null 2>&1 || true; } && autoreconf -fi >/dev/null 2>&1 &&
   PKG_CONFIG_PATH=$P/lib/pkgconfig PKG_CONFIG_LIBDIR=$P/lib/pkgconfig CFLAGS="$CF -I$P/include" LDFLAGS="-static -L$P/lib" LIBS=-lm \
-    ./configure --host=$H --with-ssl=openssl --with-pipe --with-ffmpeg --with-airplay-2 --with-external-mdns --without-libdaemon >/dev/null &&
+    ./configure --host=$H --with-ssl=openssl --with-pipe --with-metadata --with-ffmpeg --with-airplay-2 --with-external-mdns --without-libdaemon >/dev/null &&
   # libgcrypt wants libgpg-error after it; libcrypto and libgcrypt both define gf_mul (Classic McEliece, Ed448), which nothing here calls
   make -j"$(nproc)" LDFLAGS="-static -Wl,--allow-multiple-definition -L$P/lib" LIBS="$(grep ^LIBS Makefile | cut -d= -f2-) -lgpg-error -lm -lpthread -ldl" >/dev/null &&
   $H-strip shairport-sync && cp shairport-sync "$OUT/" )
