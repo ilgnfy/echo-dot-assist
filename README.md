@@ -34,10 +34,11 @@ This is a fork of [0x0520/echo-dot-assist](https://github.com/0x0520/echo-dot-as
 - Smarter **arbitration** between Echos (learned window, Kiosk Satellite mode, joining without extra permissions).
 
 **Taken over from the original** (2026-10-22): the offline alarm clock, the task manager, the Bluetooth AAC and secure-pairing switches, the "Wi-Fi setup over Bluetooth"
-switch, the client write queue, and the original's root-side and network hardening.
+switch, and the original's safety work: a stalled Home Assistant link holds up no one, a silenced reply can no longer silence the ones after it, helper processes have a
+deadline, hostile devices on your network are bounded (arbitration keys, the update port, a Wyoming allowlist), and the root side and Bluetooth hardening.
 
-**Still missing from the original:** its core locking and liveness fixes (the satellite core cannot hang), and some arbitration and network limits against hostile devices
-on your LAN. They are safety work, not features; [the page above](docs/original-vs-fork.md#what-the-open-items-are) explains each.
+**Not taken over, on purpose:** the original's split of the main program into modules, and the last step of its liveness work (microphone audio through a thread of its own);
+[the page above](docs/original-vs-fork.md#what-was-left-out-and-why) says why.
 
 ## Supported Echos
 

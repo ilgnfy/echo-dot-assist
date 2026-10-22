@@ -610,6 +610,7 @@ ARGS=""                     # extra options, below
 | `ARGS` option | Effect |
 |---|---|
 | `-W 0` | no settings page (port 28931) |
+| `-A <addresses>` | only these IPv4 addresses or subnets may connect to the protocol port (`192.168.1.10,10.0.0.0/24`): for Wyoming, which has no authentication, give Home Assistant's address; anything else is closed at accept. Not for the ESPHome mode, whose connections are encrypted |
 | `-m <pryon.manifest>` | wake word model to start with, until one is picked in Home Assistant |
 | `-w remote` | wake word in Home Assistant; the page then cannot change it |
 | `-E` | no sound on wake |

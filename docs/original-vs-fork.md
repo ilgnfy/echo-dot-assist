@@ -23,42 +23,37 @@ what needed the cloud. What is still missing is the original's hardening of the 
 | **Task manager**: CPU, memory, load, top processes, last kill, kill through root | `taskmgr.c`, `scripts/top.sh` | 2026-10-22 |
 | **Client write queue**: a stalled Home Assistant link holds up no one | `outq.c`, from `6bd155d` | 2026-10-22 |
 | Switch **"Wi-Fi setup over Bluetooth"** (on by default; off, the Echo never advertises) | `improv.c`; the fork's Improv itself is its own (automatic: offline 20 s, or the action button) | 2026-10-22 |
+| **Network hardening**: arbitration candidates heard twice and bounded per address and per minute, update-port back-off per address, Wyoming allowlist (`-A`, `-W` is the settings page here), close-on-exec sockets, a Wyoming reply a client left open is ended | `b6e7727`, `0e808f6`, `9903b5e` | 2026-10-22 |
+| **Core liveness (part of `335f41a`)**: replies as numbered streams (a media stop during a slow fetch no longer silences every later reply), TTS queue bounded at 1 MiB with back pressure, helper processes with a deadline and their process group killed, one process per 2 s instead of three for the volume poll, the earcon thread asleep instead of polling every 20 ms, the wake engine reset by the capture thread, no core lock for the pipeline timeout every block, core threads checked | `335f41a` | 2026-10-22 |
+| **Improv hardening**: the action button authorizes only a connected phone and a disconnect takes it back; ATT PDUs longer than the MTU dropped | `f3cf607` | 2026-10-22 |
 | Entities that were page-only in the fork: mic level, noise reduction, Bluetooth announcements and language, debug access, join arbitration, Music Assistant without pairing, sound detection, Wi-Fi motion, SoC temperature, CPU usage | `proto_esphome.c` | 2026-10-22 |
 
 ## Only in the original (what the fork still lacks)
 
 | feature | where | state in the fork |
 |---|---|---|
-| **Core locking and liveness fixes** | `335f41a`, about 500 lines of `main.c` | **not ported**: see "What the open items are" below |
-| Arbitration candidate limits, bounded network peers, Wyoming allowlist, push-port back-off, Sendspin and Bluetooth hardening against hostile peers | `fix:` commits of 2026-10-05 | partly taken (above); **to review** one by one |
-| Improv hardening | `improv.c` | the fork has its own `improv.c` |
+| The rest of **core locking and liveness** (`335f41a`): microphone audio through a queue and a sender thread of its own, so noise reduction and gain run outside `core_lock` | `main.c` | **deliberately not ported**: see below |
+| Sendspin and Bluetooth hardening, Wyoming allowlist, push-port back-off, arbitration limits | `fix:` commits of 2026-10-05 | **ported** (above) |
 | Alexa on without a reboot | `scripts/alexa-on.sh` | not wanted any more (cloud-free) |
 | Online updates from GitHub, "Download from Amazon", whisper detection | `update.c` and others | removed on purpose (cloud-free) |
 | Downgrade protection for release-signed bundles | `ota.c`, `main.sh` | not needed: the fork trusts only the owner's key |
 | `main.c` split into modules (`core_int.h`, `mic.c`, `playback.c`, `wakedet.c`, `wakewords.c`, `spawn.c`), `a2dp.c` split into link/SDP/sink/AVRCP/source | refactor | a different structure; not ported (would conflict with every fork change) |
 | `make lint`, pinned CI actions, dev container, Windows install docs (WSL2) | CI, docs | the fork has its own CI; Windows Git Bash setup |
 
-## What the open items are
+## What was left out, and why
 
-**Core locking and liveness (`335f41a`).** The satellite core (`main.c`) is one state machine that many threads touch under one lock, `core_lock`. The original
-found, on its own Echo, ways that lock or the state behind it could wedge the satellite:
-- *Numbered reply streams*: a cut (barge-in, "stop", media stop) must drop only the reply it was meant for. In the old code a media stop during a slow fetch left
-  a flag set and every later ESPHome reply was silent until a restart.
-- *Mic audio through a queue and a sender thread*, so noise reduction and gain run outside the lock and a stalled client cannot make the wake word deaf (the client
-  write queue, which the fork now has, covers the writes; this covers the capture thread's own work under the lock).
-- Wake word detections and "stop" handed to the capture thread, which owns the ring buffer, instead of being poked from other threads.
-- *Child processes with a deadline* (`run_output`: poll 1-2 s, then kill the process group), so a hung helper cannot hold the lock; volume and EQ read at start.
-- A bounded TTS queue (1 MiB), the earcon thread on a condition variable, thread creation checked, a failed wake word switch falling back and saying so.
+**Microphone audio through a queue and a sender thread (part of `335f41a`).** In the original the capture thread, which also feeds the wake word,
+used to do noise reduction, gain and the write to the client under `core_lock`. A stalled client then made the wake word deaf. The fork has
+the other half of that fix, the per-connection write queue, so a stalled client no longer blocks anything. What is left is that RNNoise and the gain run for
+a few milliseconds per 30 ms block under the same lock. Moving that to a thread of its own would touch the audio ring, the echo suppressor and the
+noise reducer, which keep state between blocks and are single-threaded today, and the fork has changed all three. The risk (garbled microphone
+audio, a wake word that stops hearing) is larger than the gain, and it can only be tested on the PC. If a real stall is ever seen, this is the place to look.
 
-It is not a feature; it is the difference between "usually fine" and "cannot hang". The fork's core has changed a great deal since (second wake word, microWakeWord,
-separate volumes, Drop In, light ring), so the patch does not apply as a block. The plan is to port its fixes one at a time, each with the test that fails on the old
-code (the first: a media stop during a slow fetch, then an announcement and a reply both play).
+**The module split** (`core_int.h`, `mic.c`, `playback.c`, `wakedet.c`, `wakewords.c`, `spawn.c`, `a2dp.c` into five) is a different structure of the same code. It would
+conflict with every change the fork has made since, and gains nothing for a user.
 
-**Arbitration limits and bounded peers.** Several Echos on one network exchange broadcasts. The original caps how many candidates, members and pairings one packet can
-create, so a hostile or buggy device on the LAN cannot make an Echo allocate or loop without end. Small changes, each worth a review in the fork's own `arb.c`.
-
-**Network hardening of Wyoming and the push port.** An allowlist for who may talk Wyoming, and a back-off on the update port after wrong signatures. The fork's
-Wyoming is the secondary protocol and the push port only accepts the owner's key, so the gain is smaller than in the original.
+**Downgrade protection for release-signed bundles, Alexa-on without a reboot, online updates, the Amazon download:** not wanted or not possible in a fork that trusts only
+its owner's key and talks to no cloud.
 
 ## Only in the fork (what the original lacks)
 

@@ -20,7 +20,8 @@ Put the Echo on a network without internet as a second layer.
   the key when you add the Echo, sets it over an encrypted connection, and clears it when you delete the device.
   **Until then anyone on the network can connect**, or set a key first (then see
   [When something is wrong](../README.md#when-something-is-wrong)). The key lives in `/data/local/hassmic/state/api_key`.
-- **Wyoming**: unencrypted and unauthenticated, like every Wyoming satellite.
+- **Wyoming**: unencrypted and unauthenticated, like every Wyoming satellite. The newest connection takes the place of the old one, so anyone on the network could take Home Assistant's place and hear the microphone: put Home Assistant's address in `ARGS` as `-A <address>` and everything else is closed at accept.
+- **A client that stalls** (a Wi-Fi link that stopped, a client that never reads) holds up no one: every connection has an outgoing queue and a writer thread of its own, microphone audio is left out while a client is behind, and a client that never catches up is let go.
 
 ## Settings page
 
@@ -78,6 +79,8 @@ link, or from the button pairing.
 - **Buttons**: a member hands the key only if exactly one Echo asked, from 2 minutes before its own buttons were held.
   Someone on the network who asks as well only makes it fail, and the newcomer's buttons go first.
 
+Beacons are unauthenticated, so they are bounded: an Echo outside the network is handled only after it has been heard twice at least 9 s apart, hand-overs happen at most every 5 s, one source address may offer at most two keys, the Echo takes at most 8 new keys a minute, and an Echo that is established is never pushed out of the table by a flood of made-up keys.
+
 The key travels encrypted to the receiving Echo, so it is not readable in Home Assistant's states, traces or logbook.
 Rounds are authenticated with the key and cannot be replayed. Keys: `state/arb_key`, `state/arbitration`.
 
@@ -86,7 +89,7 @@ while that mode is on.
 
 ## Updates
 
-Installed only when signed with your `secrets/update.key` (pushed from your PC). Root checks
+Installed only when signed with your `secrets/update.key` (pushed from your PC). The push port serves one connection at a time with an end to every step; an address whose connections fail three times within a minute is turned away for a minute, and one that proves the key starts from zero. Opening adb over Wi-Fi with the key admits only the address that signed it. Root checks
 the signature, with the tool and key from the system partition or the installed copy, before anything is unpacked.
 Your key also opens adb over Wi-Fi. The Echo fetches no update from the internet.
 
