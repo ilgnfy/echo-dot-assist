@@ -147,6 +147,7 @@ static void *supervisor(void *arg)
 static void *reader(void *arg)
 {
     static char buf[4096];
+    size_t have = 0;                        /* bytes of a frame the last read ended in the middle of: dropping them would shift every sample after */
     int fd = -1, open_music = 0;
     (void)arg;
     thread_name("airplay-audio");
@@ -155,22 +156,25 @@ static void *reader(void *arg)
         struct pollfd p = { fd, POLLIN, 0 };
         int r = poll(&p, 1, GAP_MS);
         if (r > 0 && (p.revents & POLLIN)) {
-            ssize_t n = read(fd, buf, sizeof buf);
+            ssize_t n = read(fd, buf + have, sizeof buf - have);
             if (n > 0 && atomic_load(&enabled)) {
-                n -= n % (2 * CHANNELS);
+                size_t total = have + (size_t)n, whole = total - total % (2 * CHANNELS);
+                have = total - whole;
+                n = (ssize_t)whole;
                 if (!open_music) {
                     if (music_open(RATE, CHANNELS)) { usleep(200000); continue; }
                     open_music = 1; atomic_store(&playing, 1); core_music(MUSIC_AIRPLAY, 1);
                     fprintf(stderr, "airplay: playing\n");
                 }
                 while (music_queued_us() > MIXER_TARGET_US && !atomic_load(&yield_req)) usleep(5000);
-                if (!atomic_load(&yield_req)) music_write(buf, (size_t)n);
+                if (!atomic_load(&yield_req) && n > 0) music_write(buf, (size_t)n);
+                if (have) memmove(buf, buf + n, have);
             } else if (n == 0) usleep(100000);          /* the writer left: poll reports HUP at once while no writer is there */
             continue;
         }
         if (r > 0 && (p.revents & (POLLHUP | POLLERR))) { usleep(200000); continue; }       /* no writer yet */
         if (open_music) {                                                   /* a gap */
-            music_close(); open_music = 0; atomic_store(&playing, 0); core_music(MUSIC_AIRPLAY, 0);
+            music_close(); open_music = 0; have = 0; atomic_store(&playing, 0); core_music(MUSIC_AIRPLAY, 0);
             fprintf(stderr, "airplay: stopped\n");
         }
     }

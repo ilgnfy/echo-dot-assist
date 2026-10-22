@@ -26,7 +26,7 @@ while True:
         n = 441                                         # 10 ms
         b = b"".join(struct.pack("<hh", v, v) for v in (int(8000 * math.sin(2 * math.pi * 440 * (t + i) / 44100)) for i in range(n)))
         t += n
-        try: os.write(fd, b)
+        try: os.write(fd, b[:3]); os.write(fd, b[3:])         # a read can end inside a frame
         except BlockingIOError: pass
         except OSError: os.close(fd); fd = None
         time.sleep(0.01)
