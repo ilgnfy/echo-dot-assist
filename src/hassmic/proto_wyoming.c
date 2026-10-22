@@ -6,17 +6,29 @@
 #include <time.h>
 #include "board.h"
 #include "core.h"
+#include "outq.h"
 #include "wyoming.h"
 
 #define TTS_RATE 22050      /* assumed when audio-start carries no rate */
 
-static int client = -1;
+/* What waits for the client (outq.h): mic audio is left out past OUTQ_BEHIND (2 s of it), past OUTQ_LIMIT the client
+ * is let go.  It is sent nothing big but audio. */
+#define OUTQ_LIMIT  (512 * 1024)
+#define OUTQ_BEHIND (64 * 1024)
 
-static void send_event(const char *type, const char *data, const void *payload, size_t len)
+static int client = -1;                 /* lock held */
+static struct outq *client_q;           /* lock held: its outgoing queue, owned by its serve() */
+
+/* lock held.  Only queued: the client's writer thread sends it, so a stalled link holds up nobody.  droppable: mic audio,
+ * left out while the client is behind */
+static void send_out(const char *type, const char *data, const void *payload, size_t len, int droppable)
 {
-    if (client >= 0 && wy_write(client, type, data, payload, len) < 0)
+    struct iovec iov[3]; char head[256];
+    if (client < 0 || !client_q || (droppable && outq_behind(client_q, 256 + len))) return;
+    if (outq_put(client_q, iov, wy_event_iov(iov, head, type, data, payload, len)) < 0)
         shutdown(client, SHUT_RDWR);        /* reader thread notices and cleans up */
 }
+static void send_event(const char *type, const char *data, const void *payload, size_t len) { send_out(type, data, payload, len, 0); }
 
 static void start(void)
 {
@@ -33,7 +45,7 @@ static void audio(const void *pcm, size_t len)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     snprintf(data, sizeof data, "{\"rate\":16000,\"width\":2,\"channels\":1,\"timestamp\":%lld}",
              (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-    send_event("audio-chunk", data, pcm, len);
+    send_out("audio-chunk", data, pcm, len, 1);
 }
 
 static void played(void) { send_event("played", NULL, NULL, 0); }
@@ -94,20 +106,29 @@ static void handle(int fd, const struct wy_event *ev)
  * must not keep it out.  Served one per thread, so the new connection can push the old one out. */
 static void serve(int fd)
 {
-    struct wy_reader rd; struct wy_event *ev = malloc(sizeof *ev);
+    struct wy_reader rd; struct wy_event *ev = malloc(sizeof *ev); struct outq *q;
     if (!ev || wy_reader_init(&rd, fd) < 0) { free(ev); return; }
+    /* The claim comes first and the queue (a thread) after it: a client that connects right behind a probe that closes at once must not be
+     * pushed out by the probe's serve() being the slower of the two to get here */
     pthread_mutex_lock(&core_lock);
     if (client >= 0) { fprintf(stderr, "client replaced by a new connection\n"); shutdown(client, SHUT_RDWR); }
-    client = fd; core_link(1, 0);
+    client = fd; client_q = NULL; core_link(1, 0);
     pthread_mutex_unlock(&core_lock);
+    q = outq_open(fd, OUTQ_LIMIT, OUTQ_BEHIND);
+    pthread_mutex_lock(&core_lock);
+    if (q && client == fd) client_q = q;
+    else if (!q && client == fd) { client = -1; core_link(0, 0); }       /* cannot serve it: no queue */
+    pthread_mutex_unlock(&core_lock);
+    if (!q) { wy_reader_free(&rd); free(ev); return; }
     fprintf(stderr, "client connected\n");
 
     while (wy_read(&rd, ev) > 0) handle(fd, ev);
 
     pthread_mutex_lock(&core_lock);
     int was = client == fd;
-    if (was) { client = -1; core_link(0, 0); }
+    if (was) { client = -1; client_q = NULL; core_link(0, 0); }
     pthread_mutex_unlock(&core_lock);
+    outq_close(q);                          /* nothing queues for it any more: replaced, or gone just now */
     wy_reader_free(&rd); free(ev);
     if (was) fprintf(stderr, "client disconnected\n");
 }

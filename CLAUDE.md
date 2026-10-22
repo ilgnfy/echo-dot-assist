@@ -159,7 +159,8 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   `wake_sound_removal`, off by default; holds the audio from the sound until its echo has passed, then releases it at
   once), then `micdenoise.c` (RNNoise, settings page off/low/medium/high, off by default), then
   `micgain.c`: AGC on the mic audio sent to the pipeline (the stock
-  micAsr level is ~30 dB below what STT expects, and HA ignores the ESPHome audio settings); the wake word gets it raw. `core_lock` guards state and client socket writes; `core.h`
+  micAsr level is ~30 dB below what STT expects, and HA ignores the ESPHome audio settings); the wake word gets it raw. `core_lock` guards state and what is queued for the clients (`outq.c`: one writer thread per connection, so a
+  stalled client holds up no one; mic audio is left out past 64 KB, past 512 KB the client is let go); `core.h`
   documents per function whether the lock is held.
 - **Protocols (`struct proto` in `core.h`)**: `proto_esphome.c` (ESPHome native API incl. Noise encryption provisioned
   by HA, voice assistant, media player, timers, settings entities, Bluetooth proxy messages) and `proto_wyoming.c` +

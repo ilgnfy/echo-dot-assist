@@ -21,7 +21,8 @@ struct proto {
     int port;                                   /* default; the stock firewall admits inbound TCP 16384-32767 only */
     int threaded;                               /* serve() may run for several clients at once, one thread each */
     void (*serve)(int fd);                      /* one client until it disconnects; no lock held */
-    /* all below: core_lock held */
+    /* all below: core_lock held.  They only queue what goes to a client (outq.h, one writer thread per connection): a
+     * client whose link stalls holds up nobody, and is let go once its queue passes its limit */
     void (*start)(void);                        /* ask the server to run a pipeline; mic audio follows */
     void (*audio)(const void *pcm, size_t len); /* 16 kHz mono s16le while streaming */
     void (*stop)(void);                         /* may be NULL: pipeline given up while the mic was streaming */
@@ -50,7 +51,9 @@ struct proto {
 };
 extern const struct proto proto_wyoming, proto_esphome;
 
-extern pthread_mutex_t core_lock;               /* guards state, the client socket (writes) and everything marked "lock held" */
+extern pthread_mutex_t core_lock;               /* guards state, what is queued to the clients (and the order of it: Noise nonces are spent under
+                                                 * it) and everything marked "lock held".  Nothing under it waits for a client; each client's outgoing
+                                                 * queue has a lock of its own, taken inside it and never the other way round */
 extern const char *core_name;                   /* "Echo Dot 2 5695c4": the model and the MAC's end (main.c name_make) */
 const char *core_node_name(void);               /* "echo-dot-2-5695c4": the ESPHome device (host) name */
 void core_node_of(const char *name, char node[64]);  /* any Echo's node from its name ("Echo Dot 2 5695c4"); a node stays */

@@ -4,6 +4,8 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-22
 
+- **A stalled Home Assistant link no longer holds up the Echo**, from the original: every connection has its own outgoing queue and writer thread, so the wake word, the buttons and the other clients go on while one client does not read (before, up to 5 s each time); mic audio is left out while a client is behind, and a client that never catches up is let go.
+
 - **"Wi-Fi setup over Bluetooth"** switch (Home Assistant and settings page, on by default), from the original: off, the Echo never advertises for the phone setup (Improv).
 
 - **AirPlay 2** (switch "AirPlay 2" in Home Assistant and on the settings page, off by default): the Echo appears as an AirPlay speaker for iPhones, iPads and Macs, named like the Echo, and plays in

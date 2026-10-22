@@ -85,6 +85,7 @@
 #include "hash.h"
 #include "https.h"
 #include "noise.h"
+#include "outq.h"
 #include "sendspin.h"
 #include "taskmgr.h"
 #include "threadname.h"
@@ -147,9 +148,14 @@ enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3
  * without having said anything, and is the first to go when a new one finds them all taken: four idle connections
  * used to keep Home Assistant out until they were closed. */
 #define FIRST_MSG_S 10
-/* lock held.  enc: Noise frames (tx is used under the lock, rx by the client's reader only); keyed: with the device key;
- * actions: runs Home Assistant actions for us; talked: a message came through; since: when it connected */
-static struct { int fd, states, enc, keyed, ble, ble_free, ble_user, actions, ha_states, talked; long long since; struct noise_cs tx, rx; } clients[MAX_CLIENTS] =
+/* What waits for a client that does not take it (outq.h): mic audio is left out past OUTQ_BEHIND, and past OUTQ_LIMIT
+ * the client is let go.  The most a client is sent at once is the entity list, about 15 KB; mic audio is 33 KB a second. */
+#define OUTQ_LIMIT  (512 * 1024)
+#define OUTQ_BEHIND (64 * 1024)
+/* lock held.  enc: Noise frames (tx is used under the lock, so the nonces go in the order the frames are queued; rx is the reader's own,
+ * in serve()); keyed: with the device key; actions: runs Home Assistant actions for us; talked: a message came through; since: when it
+ * connected; q: its outgoing queue, owned by its serve() */
+static struct { int fd, states, enc, keyed, ble, ble_free, ble_user, actions, ha_states, talked; long long since; struct noise_cs tx, rx; struct outq *q; } clients[MAX_CLIENTS] =
     { { .fd = -1 }, { .fd = -1 }, { .fd = -1 }, { .fd = -1 } };
 static int va_fd = -1;                  /* lock held: voice assistant subscriber */
 static __thread int reply_fd = -1;      /* the client whose request this thread is handling */
@@ -219,47 +225,37 @@ static int client_of(int fd)            /* lock held */
     return -1;
 }
 
-/* Header and body in one call: the sockets are TCP_NODELAY, so two writes went out as two segments (every mic chunk) */
-static int write2(int fd, const void *h, size_t hl, const void *data, size_t len)
-{
-    struct iovec iov[2] = { { (void *)h, hl }, { (void *)data, len } }; int i = 0;
-    while (i < 2) {
-        if (!iov[i].iov_len) { i++; continue; }
-        ssize_t w = writev(fd, iov + i, 2 - i);
-        if (w < 0) { if (errno == EINTR) continue; return -1; }
-        for (; i < 2 && w > 0; ) {
-            size_t t = (size_t)w < iov[i].iov_len ? (size_t)w : iov[i].iov_len;
-            iov[i].iov_base = (char *)iov[i].iov_base + t; iov[i].iov_len -= t; w -= t;
-            if (!iov[i].iov_len) i++;
-        }
-    }
-    return 0;
-}
-
-/* Noise frame: 0x01, big-endian length, then a handshake message or ciphertext */
-static int write_frame(int fd, const void *data, size_t len)
+/* Noise frame: 0x01, big-endian length, then a handshake message or ciphertext.  Header and body in one piece: the
+ * sockets are TCP_NODELAY, so written apart they went out as two segments (every mic chunk) */
+static int put_frame(struct outq *q, const void *data, size_t len)
 {
     unsigned char h[3] = { 1, len >> 8, len & 0xff };
-    return len > 0xffff ? -1 : write2(fd, h, 3, data, len);
+    struct iovec iov[2] = { { h, 3 }, { (void *)data, len } };
+    return len > 0xffff ? -1 : outq_put(q, iov, 2);
 }
 
-/* lock held */
-static void send_to(int fd, unsigned type, const struct pb *b)
+/* lock held.  Only queued: the client's writer thread sends it (outq.h), so a client whose link stalls holds up nobody.
+ * droppable: mic audio, left out while the client is behind; decided before the frame is encrypted, which spends a nonce */
+static void send_out(int fd, unsigned type, const struct pb *b, int droppable)
 {
     unsigned char h[12]; struct pb hb = { h, 0, sizeof h }; size_t n = b ? b->n : 0; int c = client_of(fd), rc;
-    if (fd < 0) return;
-    if (c >= 0 && clients[c].enc) {                     /* inside: big-endian type and length, then the message */
+    if (c < 0 || !clients[c].q) return;                 /* pushed out for a newer connection: its reader is ending */
+    struct outq *q = clients[c].q;
+    if (droppable && outq_behind(q, 3 + 4 + n + NOISE_TAG)) return;
+    if (clients[c].enc) {                               /* inside: big-endian type and length, then the message */
         static unsigned char pt[4 + 8192], ct[sizeof pt + NOISE_TAG];
         if (4 + n > sizeof pt) { fprintf(stderr, "esphome: message %u too long (%zu)\n", type, n); return; }
         pt[0] = type >> 8; pt[1] = type; pt[2] = n >> 8; pt[3] = n;
         if (n) memcpy(pt + 4, b->p, n);
-        rc = write_frame(fd, ct, noise_encrypt(&clients[c].tx, pt, 4 + n, ct));
+        rc = put_frame(q, ct, noise_encrypt(&clients[c].tx, pt, 4 + n, ct));
     } else {
         pb_raw(&hb, "", 1); pb_varint(&hb, n); pb_varint(&hb, type);
-        rc = write2(fd, h, hb.n, n ? b->p : NULL, n);
+        struct iovec iov[2] = { { h, hb.n }, { n ? b->p : NULL, n } };
+        rc = outq_put(q, iov, 2);
     }
     if (rc < 0) shutdown(fd, SHUT_RDWR);                /* its reader cleans up */
 }
+static void send_to(int fd, unsigned type, const struct pb *b) { send_out(fd, type, b, 0); }
 
 static void send_msg(unsigned type, const struct pb *b) { send_to(reply_fd, type, b); }          /* answer to a request */
 static void send_va(unsigned type, const struct pb *b) { send_to(va_fd, type, b); }              /* voice assistant traffic */
@@ -1488,7 +1484,7 @@ static void audio(const void *pcm, size_t len)
     for (size_t off = 0; off < len; off += 4096) {
         struct pb b = { buf, 0, sizeof buf };
         pb_bytes(&b, 1, (const char *)pcm + off, len - off < 4096 ? len - off : 4096);
-        send_va(VA_AUDIO, &b);
+        send_out(va_fd, VA_AUDIO, &b, 1);              /* a client that falls behind loses audio, never a state */
     }
 }
 
@@ -1901,7 +1897,7 @@ static long read_frame(int fd, unsigned char *buf)
 
 /* Client hello (ignored), handshake message 1, our server hello and message 2.  With a key only that key gets through;
  * without one only the all-zero PSK, which is what Home Assistant uses to set the key.  0 = encrypted from here on. */
-static int noise_handshake(int fd, int slot, unsigned char *buf, struct noise_cs *rx)
+static int noise_handshake(int fd, int slot, struct outq *q, unsigned char *buf, struct noise_cs *rx)
 {
     static const uint8_t zero[32]; uint8_t psk[32], payload[64], out[32 + NOISE_TAG + 1]; unsigned char pre;
     struct noise_hs hs; struct noise_cs tx; char hello[160]; int keyed; long n;
@@ -1911,11 +1907,11 @@ static int noise_handshake(int fd, int slot, unsigned char *buf, struct noise_cs
     pthread_mutex_unlock(&core_lock);
     size_t hl = 1 + snprintf(hello + 1, sizeof hello - 1, "%s%c%s", node_name(), 0, mac_plain()) + 1;
     hello[0] = 1;                                       /* chosen protocol: Noise */
-    if (write_frame(fd, hello, hl) < 0) return -1;
+    if (put_frame(q, hello, hl) < 0) return -1;
     noise_nn_responder_init(&hs, "NoiseAPIInit\0\0", 14);
     if (n - 1 > 32 + NOISE_TAG + (long)sizeof payload || noise_nn_read_msg1(&hs, psk, buf + 1, n - 1, payload) < 0) {
         static const char fail[] = "\x01Handshake MAC failure";           /* what the client turns into "invalid key" */
-        write_frame(fd, fail, sizeof fail - 1);
+        put_frame(q, fail, sizeof fail - 1);
         fprintf(stderr, "encryption: handshake with the wrong key (%s)\n", keyed ? "not the device key" : "no key set yet, expected the zero PSK");
         memset(psk, 0, sizeof psk);
         return -1;
@@ -1927,7 +1923,7 @@ static int noise_handshake(int fd, int slot, unsigned char *buf, struct noise_cs
     int rc = -1;
     if (clients[slot].fd == fd) {                       /* not pushed out meanwhile */
         clients[slot].tx = tx; clients[slot].enc = 1; clients[slot].keyed = keyed;
-        rc = write_frame(fd, out, ml + 1);              /* under the lock: no state may overtake it */
+        rc = put_frame(q, out, ml + 1);                 /* under the lock: no state may overtake it */
     }
     pthread_mutex_unlock(&core_lock);
     memset(&tx, 0, sizeof tx);
@@ -1939,6 +1935,7 @@ static void clear_slot(int i)           /* lock held */
     clients[i].fd = -1;
     clients[i].states = clients[i].enc = clients[i].keyed = clients[i].ble = clients[i].ble_free = clients[i].ble_user = clients[i].actions = clients[i].ha_states = clients[i].talked = 0;
     memset(&clients[i].tx, 0, sizeof clients[i].tx); memset(&clients[i].rx, 0, sizeof clients[i].rx);
+    clients[i].q = NULL;
 }
 
 /* lock held.  A slot for fd, or -1; *others: connections besides it.  Connections still silent after FIRST_MSG_S are let
@@ -1972,7 +1969,8 @@ static void serve(int fd)
 {
     unsigned char *buf = malloc(1 << 16), *pt = malloc(1 << 16), pre; uint32_t len, type, cap = 1 << 16; int slot = -1, n = 0, enc = 0;
     struct noise_cs rx;                 /* this reader's own: a slot can pass to a new connection while it still runs */
-    if (!buf || !pt) { free(buf); free(pt); return; }
+    struct outq *q = buf && pt ? outq_open(fd, OUTQ_LIMIT, OUTQ_BEHIND) : NULL;
+    if (!q) { free(buf); free(pt); return; }
     pthread_mutex_lock(&core_lock);
     { static int loaded; if (!loaded) { loaded = 1; have_light = !isnan(core_lux()); settings_load(); key_load();
                                        pthread_t t;
@@ -1980,20 +1978,21 @@ static void serve(int fd)
                                        adbwifi_start(adb_changed); wifimotion_start(wifi_changed); taskmgr_start(kill_changed); { pthread_t dt; if (!pthread_create(&dt, NULL, diag_thread, NULL)) pthread_detach(dt); }
                                        if (core_bluetooth(-1)) { ble_start(&ble_handler); a2dp_start(bt_changed); } } }
     slot = take_slot(fd, &n);
+    if (slot >= 0) clients[slot].q = q;
     int keyed = have_key;
     pthread_mutex_unlock(&core_lock);
-    if (slot < 0) { fprintf(stderr, "client refused: %d connections already\n", MAX_CLIENTS); free(buf); free(pt); return; }
+    if (slot < 0) { fprintf(stderr, "client refused: %d connections already\n", MAX_CLIENTS); outq_close(q); free(buf); free(pt); return; }
     reply_fd = fd;
     struct timeval tv = { FIRST_MSG_S, 0 };             /* until the first message: also covers the handshake */
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
 
     if (read_full(fd, &pre, 1) != 1) goto done;
     if (pre == 1) {
-        if (noise_handshake(fd, slot, buf, &rx)) goto done;
+        if (noise_handshake(fd, slot, q, buf, &rx)) goto done;
         enc = 1;
     } else if (keyed) {                                 /* the client sees 0x01 and reports "requires encryption" */
         fprintf(stderr, "encryption: plaintext connection refused, the device has a key\n");
-        write_frame(fd, "", 0);
+        put_frame(q, "", 0);
         goto done;
     }
     fprintf(stderr, "client connected (%d, %s)\n", n + 1, enc ? (keyed ? "encrypted" : "zero-PSK, to set the key") : "plaintext");
@@ -2036,6 +2035,7 @@ done:
     if (va_fd == fd) { va_fd = -1; tts_expected = 0; core_link(n > 0, 0); }      /* the voice assistant's client left: pipelines end */
     else if (!n) core_link(0, 0);
     pthread_mutex_unlock(&core_lock);
+    outq_close(q);                                      /* out of the slot: nothing queues for it any more */
     free(buf); free(pt);
     fprintf(stderr, "client disconnected (%d left)\n", n);
 }

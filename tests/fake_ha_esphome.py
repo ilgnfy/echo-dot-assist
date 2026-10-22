@@ -3,7 +3,7 @@
 info, entities and settings, the voice assistant (mic stream, wake words, replies, a second client, barge-in, "stop",
 streaming TTS), announcements over HTTP and HTTPS, do not disturb, volume, mute.  The rest of the API in
 fake_ha_esphome_{timers,features,buttons,address}.py."""
-import asyncio, os, signal, subprocess
+import asyncio, os, signal, socket, subprocess
 from aioesphomeapi import SelectInfo, SwitchInfo, NumberInfo, NumberState, SwitchState, TextSensorInfo, TextSensorState, SensorInfo
 from aioesphomeapi import APIClient, MediaPlayerInfo, MediaPlayerEntityState, VoiceAssistantEventType as Ev, BinarySensorInfo, BinarySensorState
 from esphome_common import ROOT, check, until, sync, peak, speech, settled, run
@@ -175,6 +175,42 @@ async def main(e):
     check(True, "first client unaffected when the second one leaves")
     cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_ERROR, {"code": "x", "message": "end of test pipeline"})
     await sync(cli)
+
+    # A client that stops reading (its Wi-Fi stalls) while it is sent a lot: here 2000 entity lists asked for at once,
+    # more than the kernel buffers.  What it is sent waits in its own queue, so the wake word and the other clients go
+    # on; past the queue's limit it is let go (rather than lose a state).  Every client used to be written to under
+    # the core's lock: one stalled write held up everything for its send timeout, 5 s.
+    def frame(t, body=b""):
+        def varint(v):
+            out = b""
+            while True:
+                c, v = v & 0x7f, v >> 7
+                out += bytes([c | (0x80 if v else 0)])
+                if not v: return out
+        return b"\0" + varint(len(body)) + varint(t) + body
+    stuck = socket.socket(); stuck.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    stuck.connect(("127.0.0.1", PORT))
+    stuck.sendall(frame(1, b"\x0a\x05stuck") + frame(20) + b"".join(frame(11) for _ in range(2000)))   # hello, states, lists
+    await asyncio.sleep(0.5)
+    loop = asyncio.get_running_loop(); mid = by["equalizer_mid"].key; n1 = len(states); t0 = loop.time()
+    cli.number_command(mid, 3)
+    while not any(isinstance(x, NumberState) and x.key == mid and x.state == 3 for x in states[n1:]) and loop.time() - t0 < 10:
+        await asyncio.sleep(0.02)
+    dt_state = loop.time() - t0
+    started.clear(); t0 = loop.time(); proc.send_signal(signal.SIGUSR1); await asyncio.wait_for(started.wait(), 10)
+    dt_wake = loop.time() - t0
+    check(dt_state < 1.0 and dt_wake < 1.0,
+          f"a client that stops reading holds up no one: another client's state after {dt_state:.2f} s, the wake word's pipeline after {dt_wake:.2f} s")
+    cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_ERROR, {"code": "x", "message": "end of test pipeline"})
+    stuck.settimeout(10)
+    try:
+        while stuck.recv(1 << 16): pass
+        gone = True
+    except socket.timeout: gone = False
+    except OSError: gone = True
+    stuck.close()
+    check(gone, "the client that does not catch up is let go")
+    await asyncio.sleep(0.5)
 
     # A reply that asks a follow-up question (continue_conversation) must still be interruptible by the wake word:
     # the reply is cut and the new pipeline starts at once, not after the full second of audio.

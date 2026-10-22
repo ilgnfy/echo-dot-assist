@@ -2,6 +2,7 @@
 #ifndef WYOMING_H
 #define WYOMING_H
 #include <stddef.h>
+#include <sys/uio.h>
 
 #define WY_MAX_JSON    8192
 #define WY_MAX_PAYLOAD (1 << 20)
@@ -20,8 +21,9 @@ void wy_reader_free(struct wy_reader *r);
 /* 1 = event read, 0 = peer closed, -1 = error */
 int  wy_read(struct wy_reader *r, struct wy_event *ev);
 
-/* data may be NULL; payload may be NULL.  Not thread safe: callers serialise. */
-int  wy_write(int fd, const char *type, const char *data, const void *payload, size_t payload_len);
+/* One event as three pieces (header line, data, payload) for writev or outq_put; data and payload may be NULL.  head:
+ * 256 bytes of the caller's, which iov[0] points into.  Returns 3, the count. */
+int  wy_event_iov(struct iovec iov[3], char head[256], const char *type, const char *data, const void *payload, size_t payload_len);
 
 /* Flat key lookup good enough for the fixed messages Home Assistant sends. */
 int  wy_json_int(const char *json, const char *key, long *out);

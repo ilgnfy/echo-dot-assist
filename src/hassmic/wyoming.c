@@ -52,26 +52,17 @@ int wy_read(struct wy_reader *r, struct wy_event *ev)
     return 1;
 }
 
-int wy_write(int fd, const char *type, const char *data, const void *payload, size_t payload_len)
+int wy_event_iov(struct iovec iov[3], char head[256], const char *type, const char *data, const void *payload, size_t payload_len)
 {
-    char head[256]; size_t data_len = data ? strlen(data) : 0;
-    int n = snprintf(head, sizeof head, "{\"type\":\"%s\",\"version\":\"1.5.4\"", type);
-    if (data_len)    n += snprintf(head + n, sizeof head - n, ",\"data_length\":%zu", data_len);
-    if (payload_len) n += snprintf(head + n, sizeof head - n, ",\"payload_length\":%zu", payload_len);
-    n += snprintf(head + n, sizeof head - n, "}\n");
-
-    struct iovec iov[3] = { { head, n }, { (void *)data, data_len }, { (void *)payload, payload_len } };
-    int cnt = 3, i = 0;
-    while (i < cnt) {
-        if (!iov[i].iov_len) { i++; continue; }
-        ssize_t w = writev(fd, iov + i, cnt - i);
-        if (w < 0) { if (errno == EINTR) continue; return -1; }
-        while (w > 0 && i < cnt) {
-            if ((size_t)w >= iov[i].iov_len) { w -= iov[i].iov_len; iov[i].iov_len = 0; i++; }
-            else { iov[i].iov_base = (char *)iov[i].iov_base + w; iov[i].iov_len -= w; w = 0; }
-        }
-    }
-    return 0;
+    size_t data_len = data ? strlen(data) : 0;
+    int n = snprintf(head, 256, "{\"type\":\"%s\",\"version\":\"1.5.4\"", type);
+    if (data_len)    n += snprintf(head + n, 256 - n, ",\"data_length\":%zu", data_len);
+    if (payload_len) n += snprintf(head + n, 256 - n, ",\"payload_length\":%zu", payload_len);
+    n += snprintf(head + n, 256 - n, "}\n");
+    iov[0].iov_base = head; iov[0].iov_len = (size_t)n;
+    iov[1].iov_base = (void *)data; iov[1].iov_len = data_len;
+    iov[2].iov_base = (void *)payload; iov[2].iov_len = payload_len;
+    return 3;
 }
 
 static const char *find_key(const char *json, const char *key)
