@@ -6,7 +6,7 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 - **One media player for everything the Echo plays**: it says "playing" while Sendspin (Music Assistant), a phone over Bluetooth or AirPlay plays, its pause and stop pause what plays and its play resumes it, and Home Assistant can still play audio on it. **AirPlay's title, artist and album** are three text sensors beside it ("AirPlay title", "AirPlay artist", "AirPlay album"); docs/airplay.md has a dashboard card that shows them under the player.
 
-- **AirPlay in Home Assistant's media player**: the Echo's media player says "playing" while AirPlay plays, so "stop the music" by voice, an automation or the dashboard's pause button finds it; pause and stop drop the AirPlay sender.
+- **AirPlay in Home Assistant's media player**: the Echo's media player says "playing" while AirPlay plays, so "stop the music" by voice, an automation or the dashboard's pause button finds it; pause and stop drop the AirPlay sender. There is no real pause back to the sender (DACP): no sender seen supplies the identifiers it needs (docs/airplay.md).
 
 - **AirPlay volume**: the volume slider of the phone or Mac is AirPlay's volume, over the Echo's whole range, and the Echo's own volume (buttons, Home Assistant) no longer scales it while it plays on the Echo's speaker: that volume is for the voice assistant's replies, sounds and timers. A new setting "AirPlay gain" (0 to +12 dB, 0 by default, with a limiter) lifts a quiet source.
 
