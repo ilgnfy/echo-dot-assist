@@ -60,20 +60,23 @@ gives them: Music and Spotify do, a browser tab may not). To see them *in* the m
 ```yaml
 media_player:
   - platform: universal
-    name: Echo Dot
-    unique_id: echo_dot_3_d13244_universal
+    name: Echo Dot Schlafzimmer
+    unique_id: schlafzimmer_echo_dot_3_d13244_universal
     device_class: speaker
     children:
-      - media_player.echo_dot_3_d13244_media_player
+      - media_player.echo_dot_3_media_player
+    state_template: "{{ states('media_player.echo_dot_3_media_player') }}"
     attributes:
-      media_title: sensor.echo_dot_3_d13244_airplay_title
-      media_artist: sensor.echo_dot_3_d13244_airplay_artist
-      media_album_name: sensor.echo_dot_3_d13244_airplay_album
+      media_title: sensor.schlafzimmer_echo_dot_3_d13244_airplay_title
+      media_artist: sensor.schlafzimmer_echo_dot_3_d13244_airplay_artist
+      media_album_name: sensor.schlafzimmer_echo_dot_3_d13244_airplay_album
 ```
 
-No `state:` under `attributes`: that line makes the combined player show "off" (it is meant for a switch that powers a TV on and off); without it the state follows the Echo's player.
+`state_template` gives the combined player the Echo player's state (playing, idle) outright: without it, the universal player showed "off" while the Echo played. Do not use a `state:` attribute
+for this (it is meant for a switch that powers a TV on and off and also reads "off" here). The ids above are one Echo's (a room called Schlafzimmer); yours are in Home Assistant under Developer tools -> States
+(filter `media_player.echo` and `airplay`).
 
-(The entity ids are yours: look them up on the Echo's device page.)
+
 
 ## Security
 
