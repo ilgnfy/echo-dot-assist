@@ -70,6 +70,7 @@
 #include <arpa/inet.h>
 #include "a2dp.h"
 #include "adbwifi.h"
+#include "airplay.h"
 #include "alarms.h"
 #include "arb.h"
 #include "diag.h"
@@ -133,7 +134,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_BT_AAC, KEY_BT_SECURE,
        KEY_ALARM_ON, KEY_ALARM_TIME = KEY_ALARM_ON + ALARM_SLOTS, KEY_ALARM_REPEAT = KEY_ALARM_TIME + ALARM_SLOTS,
        KEY_ALARM_STOP = KEY_ALARM_REPEAT + ALARM_SLOTS, KEY_ALARM_SNOOZE, KEY_ALARM_RINGING, KEY_ALARM_EVENT, KEY_ALARM_NEXT,
-       KEY_MEM_USED, KEY_MEM_AVAIL, KEY_LOAD, KEY_SELF_CPU, KEY_SELF_RSS, KEY_TOP, KEY_THREADS, KEY_LAST_KILL, KEY_KILL_SERVICE };
+       KEY_MEM_USED, KEY_MEM_AVAIL, KEY_LOAD, KEY_SELF_CPU, KEY_SELF_RSS, KEY_TOP, KEY_THREADS, KEY_LAST_KILL, KEY_KILL_SERVICE, KEY_AIRPLAY };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -390,6 +391,7 @@ static void send_setting(int key)       /* lock held */
     case KEY_SS_UNPAIRED: if (core_sendspin_port) { pb_uint(&b, 2, sendspin_unpaired(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_ADB_WIFI: pb_uint(&b, 2, adbwifi_open()); send_state(SWITCH_STATE, &b); break;
     case KEY_SOUND_DETECTION: pb_uint(&b, 2, core_sound(-1)); send_state(SWITCH_STATE, &b); break;
+    case KEY_AIRPLAY: if (airplay_present()) { pb_uint(&b, 2, airplay_enable(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_WIFI_MOTION_ON: if (wifimotion_present()) { pb_uint(&b, 2, wifimotion_enable(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_WIFI_MOTION_SENS: if (wifimotion_present()) { pb_float(&b, 2, wifimotion_sensitivity(-1)); send_state(NUMBER_STATE, &b); } break;
         break;
@@ -634,6 +636,7 @@ static int listed(int key)
     case KEY_WIFI_MOTION_ON: return wifimotion_present();
     case KEY_SENDSPIN_TOKEN: case KEY_SS_UNPAIRED: return core_sendspin_port != 0;
     case KEY_SOUND: return settings_on("sound_detection");
+    case KEY_AIRPLAY: return airplay_present();
     case KEY_WAKE: return settings_on("wake_events");
     case KEY_BT_PAIRING: return ble_present() && settings_on("bluetooth_audio");
     case KEY_BT_OUT_SEARCH: case KEY_BT_OUT: case KEY_BT_OUT_STATUS: case KEY_BT_OUT_DELAY: return ble_present() && settings_on("bluetooth_speaker");
@@ -781,6 +784,9 @@ static void send_setting_entities(void)
       pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
     { PB(b, 128); pb_str(&b, 1, "wake_sound"); pb_fixed32(&b, 2, KEY_WAKE_SOUND); pb_str(&b, 3, "Wake sound"); pb_str(&b, 5, "mdi:bell-ring");
       pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    /* AirPlay 2 (airplay.c): the switch; off by default, the receiver and its mDNS records exist only while on */
+    if (listed(KEY_AIRPLAY)) { PB(b, 128); pb_str(&b, 1, "airplay_2"); pb_fixed32(&b, 2, KEY_AIRPLAY); pb_str(&b, 3, "AirPlay 2");
+      pb_str(&b, 5, "mdi:apple-airplay"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     /* Sound detection (sound.h): the switch (off by default: a second decoder on the mic stream) */
     { PB(b, 128); pb_str(&b, 1, "sound_detection"); pb_fixed32(&b, 2, KEY_SOUND_DETECTION); pb_str(&b, 3, "Sound detection");
       pb_str(&b, 5, "mdi:ear-hearing"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
@@ -950,6 +956,7 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
         else fprintf(stderr, "adb over Wi-Fi: refused, the request did not come over the keyed connection\n");
         send_setting(key); return;
     }
+    else if (type == SWITCH_COMMAND && key == KEY_AIRPLAY && airplay_present()) { char e[80]; settings_set("airplay", on ? "on" : "off", e, sizeof e); send_setting(key); return; }
     else if (type == SWITCH_COMMAND && key == KEY_SOUND_DETECTION) { char e[80]; settings_set("sound_detection", on ? "on" : "off", e, sizeof e); send_setting(key); return; }
     else if (type == SWITCH_COMMAND && key == KEY_WIFI_MOTION_ON && wifimotion_present()) {
         char e[80]; settings_set("wifi_motion", on ? "on" : "off", e, sizeof e); send_setting(key); return;       /* a feature: the list follows */
@@ -1677,7 +1684,7 @@ static void on_va_set_config(const unsigned char *p, const unsigned char *end)
 /* lock held: every setting's state, to a client that subscribed (and after the web page changed one) */
 static void send_all_settings(void)
 {
-    send_setting(KEY_MIC_LEVEL); send_setting(KEY_DENOISE); send_setting(KEY_MUTE); send_setting(KEY_WAKE_SOUND); send_setting(KEY_BT_PAIRING); send_setting(KEY_BT_ANNOUNCE); send_setting(KEY_DND); send_setting(KEY_SOUND_DETECTION);
+    send_setting(KEY_MIC_LEVEL); send_setting(KEY_DENOISE); send_setting(KEY_MUTE); send_setting(KEY_WAKE_SOUND); send_setting(KEY_BT_PAIRING); send_setting(KEY_BT_ANNOUNCE); send_setting(KEY_DND); send_setting(KEY_SOUND_DETECTION); send_setting(KEY_AIRPLAY);
         send_setting(KEY_BT_LANG); send_setting(KEY_BT_AAC); send_setting(KEY_BT_SECURE);
         for (int k = KEY_EQ_BASS; k <= KEY_EQ_TREBLE; k++) send_setting(k);
         for (int k = KEY_ARB_JOIN; k <= KEY_ARB_PEERS; k++) send_setting(k);

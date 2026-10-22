@@ -30,6 +30,7 @@ TESTS = [
     ("sendspin", [PY, "tests/fake_ma_sendspin.py"]),
     ("wifi", [PY, "tests/fake_web_wifi.py"]),
     ("volumes", [PY, "tests/fake_ha_volumes.py"]),
+    ("airplay", [PY, "tests/fake_ha_airplay.py"]),
     ("improv", [PY, "tests/fake_improv.py"]),
     ("dropin", [PY, "tests/fake_ha_dropin.py"]),
     ("unit", ["make", "-s", "-j4", "unit"]),

@@ -2282,6 +2282,14 @@ red and to the patterns of a running pipeline.
 
 ### AirPlay 2 receiver (shairport-sync), next to the media player and the Bluetooth speaker
 
+**Status 2026-10-22: built, runs on the Echo, not yet heard with a real sender.**  Done: static glibc ARM builds of shairport-sync (`b991d91`, AirPlay 2) and nqptp 1.2.9
+(`tools/airplay/build.sh`, docs/airplay.md says why glibc and not bionic: no `pthread_cancel`), mDNS through avahi service files (patched backend), `airplay.c`
+(supervisor, FIFO into the music stream, `MUSIC_AIRPLAY`), root's nqptp and the firewall rules, settings/Home Assistant switch/page help, `tests/fake_ha_airplay.py`.
+Checked on the Echo by hand: both start as the daemon's user (nqptp as root), the records show up in `avahi-browse` from the PC, a client gets as far as SETUP
+(pyatv times with NTP and is refused: it cannot play AirPlay 2).  **To do with an iPhone/Mac:** does it find the Echo, does audio play, how many ms is the right
+"AirPlay delay" against another AirPlay 2 speaker, CPU/RAM while playing (`taskmgr`), does an Apple device keep it in a group; the media-player entity does not
+show AirPlay as a source (no title/state) yet; no metadata or cover art (shairport-sync can give them, the pipe backend does not).  The analysis below is from before the build.
+
 Analysis of 2026-10-21; nothing built.  Sources: shairport-sync's AIRPLAY2.md and BUILD.md, nqptp's README (fetched that day, their wording summarised),
 the device and the repo.  Things marked *check* are from memory or inferred and need a test before anyone relies on them.
 

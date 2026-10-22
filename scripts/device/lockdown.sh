@@ -44,7 +44,14 @@ NL='
 # state/config says arbitration_mode=kiosk, and taken out again when it does not.  hassmic reads nothing there but
 # those claims.  Not in stock-online mode: no hassmic runs then.
 KIOSK_IN="INPUT -i $WLAN -p udp -m udp --dport 2330 -j ACCEPT"
+# AirPlay 2 (hassmic's "airplay" setting, airplay.c) keeps its time with other devices through nqptp, which listens on UDP 319 and 320
+# (PTP, fixed ports below 1024 and outside the range): admitted from private and link-local addresses, and only while state/config says
+# airplay=on.  The rest of AirPlay (RTSP and the audio's ports) is in 16384-32767.
+AIRPLAY_PORTS="319 320"
+airplay_in() { for d in $LOCAL4; do case $d in 224.*|255.*) continue;; esac; for p in $AIRPLAY_PORTS; do echo "-A INPUT -s $d -i $WLAN -p udp -m udp --dport $p -j ACCEPT"; done; done; }
+airplay_out() { airplay_in | while read -r r; do case "$NL$1$NL" in *"$NL$r$NL"*) echo "-D ${r#-A }";; esac; done; }   # the listing $1 has them: take them out
 BASE=${HASSMIC_BASE:-/data/local/hassmic}      # only tests/lockdown_test.sh sets it
+airplay_state() { AIRPLAY=; [ -z "$OTA_ONLY" ] && grep -qx 'airplay=on' $BASE/state/config 2>/dev/null && AIRPLAY=1; }
 kiosk_state() { KIOSK=; [ -z "$OTA_ONLY" ] && grep -qx 'arbitration_mode=kiosk' $BASE/state/config 2>/dev/null && KIOSK=1; }
 
 HAVE6=; command -v ip6tables > /dev/null && HAVE6=1
@@ -94,6 +101,7 @@ keep() {
         done
         if [ -n "$ADB" ]; then echo "-A $(adb_rule)"; fi                  # only while adb over Wi-Fi is open (adb_gate)
         if [ -n "$KIOSK" ]; then echo "-A $KIOSK_IN"; fi                   # only in Kiosk Satellite mode (kiosk_state)
+        if [ -n "$AIRPLAY" ]; then airplay_in; fi                          # only with AirPlay on (airplay_state)
     else
         echo "-A INPUT -p icmpv6 -j ACCEPT"                                # neighbour discovery: no IPv6 without it
         echo "-A INPUT -i $WLAN -p udp -m udp --dport 546 -j ACCEPT"       # DHCPv6
@@ -211,6 +219,7 @@ load_once() {
         missing $1 "$all"
         adb_stale "$all"
         [ -n "$KIOSK" ] || echo "$all" | while read -r r; do [ "$r" = "-A $KIOSK_IN" ] && echo "-D $KIOSK_IN"; done
+        [ -n "$AIRPLAY" ] || [ $1 != iptables ] || airplay_out "$all"
         echo COMMIT
     )
     echo "$in" | $1-restore -w --noflush
@@ -232,11 +241,12 @@ load_each() {
     missing $1 "$($1 -w -S)" | while read -r r; do $1 -w $r || echo "!! rule not loaded ($1): $r"; done
     adb_stale "$($1 -w -S)" | while read -r r; do $1 -w $r 2>/dev/null; done
     [ -n "$KIOSK" ] || while $1 -w -D $KIOSK_IN 2>/dev/null; do :; done
+    [ -n "$AIRPLAY" ] || [ $1 != iptables ] || airplay_in | while read -r r; do while $1 -w -D ${r#-A } 2>/dev/null; do :; done; done
     $1 -w -P INPUT DROP
 }
 load() { load_once $1 2>/dev/null || load_once $1 || { echo "!! $1-restore failed twice: loading rule by rule"; load_each $1; }; }
 apply() {
-    DNS=$(resolvers); kiosk_state
+    DNS=$(resolvers); kiosk_state; airplay_state
     load iptables
     if [ -n "$HAVE6" ]; then load ip6tables; else v6off; fi
     # adbd last, and a second later in the background: its restart ends every adb shell, the one running this script
@@ -252,7 +262,7 @@ apply() {
 # first in OUTPUT, INPUT policy DROP, each of stock's rules we need, the adb port not admitted unless it is open, nor
 # Kiosk Satellite's unless in that mode; without ip6tables, IPv6 off on every interface.
 wrong() {
-    kiosk_state
+    kiosk_state; airplay_state
     for t in iptables ${HAVE6:+ip6tables}; do
         [ "$($t -w -S hassmic_out 2>/dev/null)" = "-N hassmic_out$NL$(rules $t)" ] || { echo "$t: hassmic_out is not as loaded"; return 1; }
         o=$($t -w -S OUTPUT 2>/dev/null)                   # policy line, then its rules (cutting them out of the whole
@@ -262,6 +272,7 @@ wrong() {
         m=$(missing $t "$all"); [ -z "$m" ] || { echo "$t: missing:" $m; return 1; }
         st=$(adb_stale "$all"); [ -z "$st" ] || { st=${st%%"$NL"*}; echo "$t: port 5555 (adb) admitted: -A ${st#-D }"; return 1; }
         [ -n "$KIOSK" ] || case "$NL$all$NL" in *"$NL-A $KIOSK_IN$NL"*) echo "$t: port 2330 (Kiosk Satellite) admitted"; return 1;; esac
+        [ -n "$AIRPLAY" ] || [ $t != iptables ] || case "$NL$all$NL" in *"-p udp -m udp --dport 319 -j ACCEPT$NL"*) echo "$t: port 319 (AirPlay's clock) admitted"; return 1;; esac
     done
     [ -n "$HAVE6" ] || for f in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
         v=; { read v < $f; } 2>/dev/null; [ "$v" = 1 ] || { echo "IPv6 is on (${f%/*})"; return 1; }

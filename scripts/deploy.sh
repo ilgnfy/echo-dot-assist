@@ -7,6 +7,6 @@ cd "$(dirname "$0")/.."
 . scripts/lib/build.sh; build_binaries
 D=/data/local/hassmic
 adb shell "mkdir -p $D"
-adb push $(ls $OUT/mixcap $OUT/mixplay $OUT/pryon_test 2>/dev/null) $OUT/hassmic $OUT/runas $DDIR/device.conf scripts/device/*.sh testdata/alexa_espeak.raw $D/ >/dev/null
+adb push $(ls $OUT/mixcap $OUT/mixplay $OUT/pryon_test 2>/dev/null) $(ls $DDIR/prebuilt/airplay/shairport-sync $DDIR/prebuilt/airplay/nqptp 2>/dev/null) $OUT/hassmic $OUT/runas $DDIR/device.conf scripts/device/*.sh testdata/alexa_espeak.raw $D/ >/dev/null
 adb shell "chmod 755 $D/*"
 echo "pushed $DEVICE build to $D"

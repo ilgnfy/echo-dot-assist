@@ -170,7 +170,7 @@ int    core_alarm_ringing(void);                            /* a timer or the al
 const struct proto *core_proto(void);                       /* lock held: the protocol while a client is connected, else NULL */
 int    core_timer_ring(int set);                            /* seconds a ring lasts, 0 until stopped; -1 reads */
 int    core_timer_stop_any(int set);                        /* 1: any recognised speech stops a ring; -1 reads */
-enum { MUSIC_SENDSPIN = 1, MUSIC_BLUETOOTH = 2 };
+enum { MUSIC_SENDSPIN = 1, MUSIC_BLUETOOTH = 2, MUSIC_AIRPLAY = 4 };
 void   core_music(int source, int on);                      /* a music stream runs: the wake word threshold follows */
 void   core_bt_device(const char *name, int on);            /* a Bluetooth speaker source connected / went (not the lock) */
 void   core_bt_pairing(int on);                             /* the Bluetooth speaker's pairing window opened / closed (not the lock) */

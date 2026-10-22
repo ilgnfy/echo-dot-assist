@@ -40,6 +40,7 @@
 #include "audio.h"
 #include "a2dp.h"
 #include "alarms.h"
+#include "airplay.h"
 #include "arb.h"
 #include "ble.h"
 #include "improv.h"
@@ -990,6 +991,7 @@ static long long music_stopped_ms;                  /* core_lock: when a stop la
 static int music_stop(void)
 {
     int paused = (core_sendspin_port && sendspin_stop()) | a2dp_stop();     /* both: one may not have heard it yet */
+    if (airplay_playing()) { airplay_yield(); paused = 1; }                  /* AirPlay: the sender is dropped */
     if (paused) music_stopped_ms = mono_ms();
     return paused;
 }
@@ -1601,10 +1603,11 @@ void core_music(int source, int on)
 {
     int was = on ? atomic_fetch_or(&music_on, source) : atomic_fetch_and(&music_on, ~source);
     if (on && !(was & source)) {
-        if (source == MUSIC_BLUETOOTH && was & MUSIC_SENDSPIN && core_sendspin_port) sendspin_pause();
-        if (source == MUSIC_SENDSPIN && was & MUSIC_BLUETOOTH) a2dp_pause();
+        if (source != MUSIC_SENDSPIN && was & MUSIC_SENDSPIN && core_sendspin_port) sendspin_pause();
+        if (source != MUSIC_BLUETOOTH && was & MUSIC_BLUETOOTH) a2dp_pause();
+        if (source != MUSIC_AIRPLAY && was & MUSIC_AIRPLAY) airplay_yield();       /* the sender is dropped: AirPlay has no pause to ask for */
     }
-    if (!on && source == MUSIC_SENDSPIN && was & MUSIC_SENDSPIN) a2dp_unyield();
+    if (!on && source != MUSIC_BLUETOOTH && was & source) a2dp_unyield();
     if (!was != !atomic_load(&music_on)) playback_hint();
 }
 
@@ -2494,6 +2497,7 @@ int main(int argc, char **argv)
     if (dropin_port && arb_running() && dropin_start(dropin_port)) fprintf(stderr, "drop in: not available\n");
 
     pthread_t cap_t, play_t, ear_t;
+    airplay_init();
     { pthread_t at; alarms_init(); if (!pthread_create(&at, NULL, alarm_thread, NULL)) pthread_detach(at); }
     pthread_create(&cap_t, NULL, capture_thread, NULL);
     pthread_create(&play_t, NULL, playback_thread, NULL);

@@ -1,6 +1,7 @@
 #include "settings.h"
 #include "core.h"
 #include "a2dp.h"
+#include "airplay.h"
 #include "arb.h"
 #include "dropin.h"
 #include "https.h"
@@ -56,7 +57,7 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 enum id { WAKE_ENGINE, MIC_LEVEL, DENOISE, WAKE_SOUND, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_STOP_ANY, BT_ANNOUNCE, BT_LANG, BT_AAC, BT_SECURE, LED_AUTO, LED_LEVEL, RING_ROT, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WAKE_EVENTS, WIFI_MOTION,
           WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, HTTPS_VERIFY, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
-          CALL_LINK, CALL_LEVEL, CALL_OFFSET, NSET };
+          CALL_LINK, CALL_LEVEL, CALL_OFFSET, AIRPLAY, AIRPLAY_DELAY, NSET };
 
 /* Features ("Features" group, feature = 1): Home Assistant lists their entities only while they are on (proto_esphome.c
  * listed()); everything else here is on the settings page only, except what Home Assistant always shows (wake sound,
@@ -108,6 +109,10 @@ static const struct setting table[NSET] = {
     [DROPIN]      = { "drop_in", "Drop In", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     [DROPIN_ANSWER] = { "drop_in_answer", "Drop In answers", "Features", NULL, S_CHOICE, 0, 0, 1, 0 },
     /* https.c keeps it: media from a Home Assistant that serves HTTPS itself (issue #30) */
+    /* airplay.c keeps them in memory, state/config on disk (root's main.sh and lockdown.sh read "airplay=on" there: nqptp, UDP 319/320).
+     * The delay is the Echo's own (mixer queue and speaker), found by ear against another AirPlay speaker: not exported */
+    [AIRPLAY]     = { "airplay", "AirPlay 2", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
+    [AIRPLAY_DELAY] = { "airplay_delay", "AirPlay delay", "Features", "ms", S_INT, 0, 1000, 0, 0 },
     [HTTPS_VERIFY] = { "https_verify", "Check HTTPS certificates", "System", NULL, S_BOOL, 0, 1, 1, 0 },
     [SS_UNPAIRED] = { "sendspin_unpaired", "Music Assistant without pairing", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
     [EQ_BASS]     = { "equalizer_bass", "Equalizer bass", "Sound", "dB", S_INT, -6, 6, 1, 0 },
@@ -147,6 +152,7 @@ static int present(enum id i)
     case WIFI_MOTION: case WIFI_SENS: return wifimotion_present();
     case ARB: case ARB_MODE: case ARB_AUTO: case ARB_WINDOW: case ARB_OFFSET: return arb_running();
     case DROPIN: case DROPIN_ANSWER: return dropin_running();
+    case AIRPLAY: case AIRPLAY_DELAY: return airplay_present();
     case SS_UNPAIRED: return core_sendspin_port != 0;
     case SPK_GAIN: return spkgain_present();
     default: return 1;
@@ -222,6 +228,8 @@ int settings_get(const struct setting *s)
     case LIGHT_SENSOR: return light_sensor;
     case WAKE_EVENTS: return wake_events;
     case DROPIN: return dropin_enable(-1);
+    case AIRPLAY: return airplay_enable(-1);
+    case AIRPLAY_DELAY: return airplay_delay(INT_MIN);
     case DROPIN_ANSWER: return dropin_ask(-1);
     case SPK_GAIN: return spkgain_get();
     case VOLUME: return core_volume();
@@ -273,6 +281,8 @@ static void put(enum id i, int v)
     case BT_OUT_AWAKE: btout_keep_awake(v); break;
     case BT_OUT_STAY: bt_stay = v; a2dp_out_stay(v && bt_speaker); break;
     case DROPIN: dropin_enable(v); break;
+    case AIRPLAY: airplay_enable(v); break;
+    case AIRPLAY_DELAY: airplay_delay(v); break;
     case DROPIN_ANSWER: dropin_ask(v); break;
     case SPK_GAIN: spkgain_set(v); break;
     case VOLUME: core_set_volume(v); break;

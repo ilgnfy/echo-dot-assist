@@ -4,6 +4,11 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-22
 
+- **AirPlay 2** (switch "AirPlay 2" in Home Assistant and on the settings page, off by default): the Echo appears as an AirPlay speaker for iPhones, iPads and Macs, named like the Echo, and plays in
+  step with other AirPlay 2 speakers (the receiver is shairport-sync with the clock nqptp, both run on the Echo itself, no Music Assistant in between). It is one more music source: the newest wins as
+  with Bluetooth and Music Assistant, and "<wake word>, stop" disconnects the sender. "AirPlay delay" (settings page) moves the Echo against other speakers. While on, the Echo also answers on UDP 319 and
+  320 from your home network. docs/airplay.md.
+
 - **An alarm clock on the Echo and a task manager**, from the original project: three alarms (time, once or repeating) that you set in Home Assistant and that ring on the
   Echo itself, also while Home Assistant or the network is down (the time of day comes from Home Assistant after each start; none rings before). They ring like a finished timer
   and stop the same ways; "Snooze alarm" and "Next alarm" are there too. The task manager shows memory, load, the busiest processes and hassmic's own threads as sensors and

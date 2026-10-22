@@ -82,6 +82,17 @@ ask '0\n'
 [ -z "$(adb_rules)" ] && checks; ok $? "rule by rule: closed"
 for t in iptables-restore ip6tables-restore; do mv -f $T/$t $T/bin/$t; done
 
+# AirPlay's clock (nqptp): UDP 319 and 320 from private and link-local addresses, only while state/config says airplay=on
+ap_rules() { iptables -w -S INPUT | grep -c -- "--dport 3[12]"; }
+mkdir -p $BASE/state; echo 'airplay=on' > $BASE/state/config; lockdown
+[ "$(ap_rules)" = 8 ] && iptables -w -S INPUT | grep -q -- "-A INPUT -s 192.168.0.0/16 -i wlan0 -p udp -m udp --dport 319 -j ACCEPT" && ! iptables -w -S INPUT | grep -q -- "-s 224" && checks; ok $? "airplay=on: ports 319 and 320 admitted from the 4 local ranges only"
+echo 'airplay=off' > $BASE/state/config; lockdown
+[ "$(ap_rules)" = 0 ] && checks; ok $? "airplay=off: taken out again"
+echo 'airplay=on' > $BASE/state/config; lockdown; echo 'airplay=off' > $BASE/state/config
+checks; [ $? != 0 ] && grep -q "port 319 (AirPlay's clock) admitted" $T/check; ok $? "check catches the port left open after the switch went off"
+lockdown; checks; ok $? "and the next load closes it"
+rm -f $BASE/state/config
+
 # (The watcher loop itself, run in the background, did not react in the parallel suite's namespaces although it does alone; the load, the
 # apply, the check and the request handling above are what is tested.  tests/ota_push_test.sh covers the request protocol end to end.)
 

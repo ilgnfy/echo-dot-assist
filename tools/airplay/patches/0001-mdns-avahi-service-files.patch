@@ -1,0 +1,138 @@
+diff --git a/mdns_external.c b/mdns_external.c
+index 3e91516..5686320 100644
+--- a/mdns_external.c
++++ b/mdns_external.c
+@@ -81,46 +81,89 @@ static int fork_execvp(const char *file, char *const argv[]) {
+   return response;
+ }
+ 
+-static int mdns_external_avahi_register(char *ap1name, __attribute__((unused)) char *ap2name,
+-                                        __attribute__((unused)) int port,
+-                                        __attribute__((unused)) char **txt_records,
+-                                        __attribute__((unused)) char **secondary_txt_records) {
+-  char mdns_port[6];
+-  snprintf(mdns_port, sizeof(mdns_port), "%d", config.port);
++/*
++ * hassmic: the "external-avahi" backend writes the stock avahi-daemon's service files itself instead of running avahi-publish-service, which the Echo
++ * does not have and which could not carry AirPlay 2's text records anyway (the stock backend publishes the classic RAOP record only).  One file per
++ * service, in HASSMIC_AVAHI_DIR (default /data/misc/avahi/services); avahi notices a new or changed file by itself.
++ */
++#include <stdlib.h>
++#include <sys/stat.h>
++
++static char hm_raop_file[256], hm_ap2_file[256];
++
++static void hm_xml(FILE *f, const char *s) {
++  for (; *s; s++)
++    switch (*s) {
++    case '&': fputs("&amp;", f); break;
++    case '<': fputs("&lt;", f); break;
++    case '>': fputs("&gt;", f); break;
++    case '"': fputs("&quot;", f); break;
++    default: fputc(*s, f);
++    }
++}
+ 
+-  char *argvwithoutmetadata[] = {
+-      NULL, ap1name, config.regtype, mdns_port, MDNS_RECORD_WITHOUT_METADATA, NULL};
+-#ifdef CONFIG_METADATA
+-  char *argvwithmetadata[] = {NULL, ap1name, config.regtype, mdns_port, MDNS_RECORD_WITH_METADATA,
+-                              NULL};
+-#endif
+-  char **argv;
++static int hm_service_file(const char *path, const char *name, const char *type, int port, char **txt) {
++  char tmp[300];
++  snprintf(tmp, sizeof tmp, "%s.new", path);
++  FILE *f = fopen(tmp, "w");
++  if (!f)
++    return -1;
++  fputs("<?xml version=\"1.0\" standalone='no'?>\n<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">\n<service-group>\n<name>", f);
++  hm_xml(f, name);
++  fprintf(f, "</name>\n<service>\n<type>%s</type>\n<port>%d</port>\n", type, port);
++  for (; txt && *txt; txt++) {
++    fputs("<txt-record>", f);
++    hm_xml(f, *txt);
++    fputs("</txt-record>\n", f);
++  }
++  fputs("</service>\n</service-group>\n", f);
++  fchmod(fileno(f), 0644);
++  if (fclose(f) != 0 || rename(tmp, path) != 0) {
++    unlink(tmp);
++    return -1;
++  }
++  return 0;
++}
+ 
+-#ifdef CONFIG_METADATA
+-  if (config.metadata_enabled)
+-    argv = argvwithmetadata;
+-  else
++static int hm_names_set;
++static char hm_ap1[256], hm_ap2[256];
++
++static void hm_write(char **txt_records, char **secondary_txt_records) {
++  if (hm_service_file(hm_raop_file, hm_ap1, "_raop._tcp", config.port, txt_records) != 0)
++    warn("could not write %s", hm_raop_file);
++#ifdef CONFIG_AIRPLAY_2
++  if (secondary_txt_records && hm_service_file(hm_ap2_file, hm_ap2, "_airplay._tcp", config.port, secondary_txt_records) != 0)
++    warn("could not write %s", hm_ap2_file);
++#else
++  (void)secondary_txt_records;
+ #endif
+-    argv = argvwithoutmetadata;
++}
+ 
+-  argv[0] = "avahi-publish-service";
+-  int pid = fork_execvp(argv[0], argv);
+-  if (pid >= 0) {
+-    mdns_pid = pid;
+-    return 0;
+-  } else
+-    warn("Calling %s failed !", argv[0]);
++static int mdns_external_avahi_register(char *ap1name, char *ap2name, __attribute__((unused)) int port, char **txt_records,
++                                        char **secondary_txt_records) {
++  const char *dir = getenv("HASSMIC_AVAHI_DIR");
++  if (!dir)
++    dir = "/data/misc/avahi/services";
++  snprintf(hm_raop_file, sizeof hm_raop_file, "%s/airplay-raop.service", dir);
++  snprintf(hm_ap2_file, sizeof hm_ap2_file, "%s/airplay-ap2.service", dir);
++  snprintf(hm_ap1, sizeof hm_ap1, "%s", ap1name);
++  snprintf(hm_ap2, sizeof hm_ap2, "%s", ap2name);
++  hm_names_set = 1;
++  hm_write(txt_records, secondary_txt_records);
++  return 0;
++}
+ 
+-  argv[0] = "mDNSPublish";
+-  pid = fork_execvp(argv[0], argv);
+-  if (pid >= 0) {
+-    mdns_pid = pid;
+-    return 0;
+-  } else
+-    warn("Calling %s failed !", argv[0]);
++static int mdns_external_avahi_update(char **txt_records, char **secondary_txt_records) {
++  if (hm_names_set)
++    hm_write(txt_records, secondary_txt_records);
++  return 0;
++}
+ 
+-  // If we reach here, both execvp calls failed.
+-  return -1;
++static void mdns_external_avahi_unregister(void) {
++  if (!hm_names_set)
++    return;
++  unlink(hm_raop_file);
++  unlink(hm_ap2_file);
+ }
+ 
+ static int mdns_external_dns_sd_register(char *ap1name, __attribute__((unused)) char *ap2name,
+@@ -165,7 +208,8 @@ static void kill_mdns_child(void) {
+ 
+ mdns_backend mdns_external_avahi = {.name = "external-avahi",
+                                     .mdns_register = mdns_external_avahi_register,
+-                                    .mdns_unregister = kill_mdns_child,
++                                    .mdns_update = mdns_external_avahi_update,
++                                    .mdns_unregister = mdns_external_avahi_unregister,
+                                     .mdns_dacp_monitor_start = NULL,
+                                     .mdns_dacp_monitor_set_id = NULL,
+                                     .mdns_dacp_monitor_stop = NULL};

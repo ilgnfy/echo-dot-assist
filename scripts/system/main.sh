@@ -236,6 +236,15 @@ avahi_start() {
 # While the settings page switches networks (wifi.sh holds its lock), the link is that script's business: no wifisvc.
 # Whenever the address changes, wifi.sh writes down which network the Echo is on, for the page: wpa_supplicant can also
 # move to another saved network by itself when the one it is on goes away.
+# AirPlay 2 (hassmic's setting "airplay", airplay.c): shairport-sync is hassmic's child, its clock nqptp needs UDP 319 and 320 and so root.
+# Runs while state/config says airplay=on (lockdown.sh admits those two ports by the same line); /dev/shm is where it shares the clock.
+airplay_clock() {
+    if grep -qx 'airplay=on' $BASE/state/config 2>/dev/null && [ -x $D/nqptp ]; then
+        pidof nqptp > /dev/null || { mkdir -p /dev/shm; chmod 1777 /dev/shm; $D/nqptp > /dev/null 2>&1 & echo "airplay: nqptp started"; }
+    else
+        pidof nqptp > /dev/null && { kill $(pidof nqptp); rm -f /dev/shm/nqptp-*; echo "airplay: nqptp stopped"; }
+    fi
+}
 netwatch() {
     miss=0 addr=
     while :; do
@@ -243,6 +252,7 @@ netwatch() {
         clock_set
         tz_set
         fwcheck
+        airplay_clock
         if [ -f $BASE/state/mdns ] && [ ! -L $BASE/state/mdns ]; then
             why=$(dd if=$BASE/state/mdns bs=60 count=1 2>/dev/null | tr -cd 'a-zA-Z0-9 ')
             rm -f $BASE/state/mdns
