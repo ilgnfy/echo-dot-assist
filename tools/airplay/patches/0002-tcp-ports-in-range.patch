@@ -1,0 +1,39 @@
+diff --git a/common.c b/common.c
+index cdf66b9..5b6df86 100644
+--- a/common.c
++++ b/common.c
+@@ -360,7 +360,7 @@ uint16_t nextFreeUDPPort() {
+ 
+ // if port is zero, pick any port
+ // otherwise, try the given port only
+-int bind_socket_and_port(int type, int ip_family, const char *self_ip_address, uint32_t scope_id,
++static int bind_socket_and_port_at(int type, int ip_family, const char *self_ip_address, uint32_t scope_id,
+                          uint16_t *port, int *sock) {
+   int ret = 0; // no error
+   int local_socket = socket(ip_family, type, 0);
+@@ -422,6 +422,25 @@ int bind_socket_and_port(int type, int ip_family, const char *self_ip_address, u
+   return ret;
+ }
+ 
++// The Echo admits inbound TCP only on 16384-32767: TCP ports that were "any port" (the AirPlay 2 event and data ports) come from the
++// range of udp_port_base instead, one after another (TCP and UDP ports do not clash).
++int bind_socket_and_port(int type, int ip_family, const char *self_ip_address, uint32_t scope_id,
++                         uint16_t *port, int *sock) {
++  if (*port != 0 || type != SOCK_STREAM || config.udp_port_base == 0 || config.udp_port_range == 0)
++    return bind_socket_and_port_at(type, ip_family, self_ip_address, scope_id, port, sock);
++  static unsigned next = 0;
++  int ret = EADDRINUSE;
++  for (unsigned i = 0; i < config.udp_port_range && ret != 0; i++) {
++    uint16_t p = config.udp_port_base + (next + i) % config.udp_port_range;
++    ret = bind_socket_and_port_at(type, ip_family, self_ip_address, scope_id, &p, sock);
++    if (ret == 0) {
++      *port = p;
++      next = (next + i + 1) % config.udp_port_range;
++    }
++  }
++  return ret;
++}
++
+ uint16_t bind_UDP_port(int ip_family, const char *self_ip_address, uint32_t scope_id, int *sock) {
+   // look for a port in the range, if any was specified.
+   int ret = 0;
