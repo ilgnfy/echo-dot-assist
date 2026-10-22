@@ -76,7 +76,8 @@ static int write_conf(void)
         "  output_format = \"S16\";\n  output_rate = %d;\n  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
         "  ignore_volume_control = \"no\";\n};\n"
         "pipe = {\n  name = \"%s\";\n};\n"
-        "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n",
+        "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
+        "diagnostics = {\n  log_verbosity = 2;\n};\n",
         core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, RATE, -atomic_load(&delay_ms) / 1000.0, fifo_path);
     return statefile_commit(&f);
 }
