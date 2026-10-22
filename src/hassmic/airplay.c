@@ -73,12 +73,12 @@ static int write_conf(void)
     if (statefile_open(&f, conf_path, 0600)) return -1;
     fprintf(f.f,
         "general = {\n  name = \"%s\";\n  port = %d;\n  udp_port_base = %d;\n  udp_port_range = %d;\n  output_backend = \"pipe\";\n"
-        "  output_format = \"S16\";\n  output_rate = %d;\n  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
+        "  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
         "  ignore_volume_control = \"no\";\n};\n"
-        "pipe = {\n  name = \"%s\";\n};\n"
+        "pipe = {\n  name = \"%s\";\n  output_format = \"S16\";\n  output_rate = %d;\n  output_channels = 2;\n};\n"   /* the backend's own section: from general they are ignored and AirPlay 2 gives S32 at 48 kHz */
         "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
         "diagnostics = {\n  log_verbosity = 2;\n};\n",
-        core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, RATE, -atomic_load(&delay_ms) / 1000.0, fifo_path);
+        core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, -atomic_load(&delay_ms) / 1000.0, fifo_path, RATE);
     return statefile_commit(&f);
 }
 
