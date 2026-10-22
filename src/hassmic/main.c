@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -217,7 +218,8 @@ static const struct proto *proto = &proto_esphome;
 pthread_mutex_t core_lock = PTHREAD_MUTEX_INITIALIZER;
 static int connected, satellite_running;
 static _Atomic(enum state) state;              /* changed under core_lock; the audio threads peek without it (core.h) */
-static time_t state_since;
+static atomic_llong state_since_ms;                 /* mono_ms of the last change, and the state it went to: the capture thread's timeout check */
+static atomic_int state_seen;                       /* needs no core_lock */
 static atomic_int streaming, trigger_pending, button_pending, pair_pending, stop_pending, quit;
 static atomic_int alarm_on;   /* barge-in: drop queued TTS; a finished timer rings */
 static atomic_int busy;                             /* state != IDLE, for threads without the lock (the ring pauses) */
@@ -269,27 +271,51 @@ static void run(const char *path, const char *a1, const char *a2)
     run_argv(argv);
 }
 
-/* Its stdout into buf (NUL-terminated, cut at n - 1); empty when it cannot run (PC build) */
-static void run_output(char *const argv[], char *buf, size_t n);
-void core_run(char *const argv[], char *out, size_t n) { run_output(argv, out, n); }
-static void run_output(char *const argv[], char *buf, size_t n)
+/* Its stdout into buf (NUL-terminated, cut at n - 1); empty when it cannot run (PC build).  It gets timeout_ms to close its stdout: these run on
+ * the capture thread (afe_score) and under core_lock (first reads of volume and equalizer), and a lipc tool that hangs on a busy daemon would
+ * otherwise make the wake word deaf or stop the whole core.  Then its process group goes (afe_score's shell has two tools under it).  No
+ * waitpid: SIGCHLD is ignored, so the kernel reaps it, and a child stuck in the kernel would hang the wait just the same.
+ * The pipe is close-on-exec: a tool forked meanwhile by another thread would otherwise hold its write end, and the read here would wait for that
+ * one to end too. */
+#define RUN_TIMEOUT_MS 1000             /* the slowest seen: two lipc calls in 150 ms */
+static long long mono_ms(void);
+static void run_output_ms(char *const argv[], char *buf, size_t n, int timeout_ms)
 {
-    int p[2]; size_t len = 0; ssize_t r;
+    int p[2]; size_t len = 0; pid_t pid;
     buf[0] = 0;
     if (pipe(p)) return;
-    if (fork() == 0) {                  /* not popen: its shell would undo child_ids() */
+    fcntl(p[0], F_SETFD, FD_CLOEXEC); fcntl(p[1], F_SETFD, FD_CLOEXEC);
+    if ((pid = fork()) == 0) {          /* not popen: its shell would undo child_ids() */
         child_ids();
-        int nul = open("/dev/null", O_WRONLY);
-        dup2(p[1], 1); if (nul >= 0) dup2(nul, 2);
-        close(p[0]); close(p[1]);
+        setpgid(0, 0);
+        int nul = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        dup2(p[1], 1); if (nul >= 0) dup2(nul, 2);      /* the copies keep no close-on-exec */
         execv(argv[0], argv);
         _exit(127);
     }
     close(p[1]);
-    while (len + 1 < n && ((r = read(p[0], buf + len, n - 1 - len)) > 0 || (r < 0 && errno == EINTR))) if (r > 0) len += (size_t)r;
+    if (pid < 0) { close(p[0]); return; }
+    setpgid(pid, pid);                  /* the child may not have got there yet */
+    for (long long end = mono_ms() + timeout_ms; len + 1 < n; ) {
+        long long left = end - mono_ms();
+        if (left <= 0) {
+            fprintf(stderr, "run: %s %s gave no answer within %d ms, killed\n", argv[0], argv[1] ? argv[1] : "", timeout_ms);
+            if (kill(-pid, SIGKILL)) kill(pid, SIGKILL);
+            break;
+        }
+        struct pollfd pf = { p[0], POLLIN, 0 };
+        int r = poll(&pf, 1, (int)left);
+        if (r < 0 && errno != EINTR) break;
+        if (r <= 0) continue;
+        ssize_t k = read(p[0], buf + len, n - 1 - len);
+        if (k > 0) len += (size_t)k;
+        else if (k == 0 || errno != EINTR) break;
+    }
     buf[len] = 0;
-    close(p[0]);                        /* SIGCHLD is ignored: nothing to wait for */
+    close(p[0]);
 }
+static void run_output(char *const argv[], char *buf, size_t n) { run_output_ms(argv, buf, n, RUN_TIMEOUT_MS); }
+void core_run(char *const argv[], char *out, size_t n) { run_output_ms(argv, out, n, 2 * RUN_TIMEOUT_MS); }
 
 /* What ring.c plays: through ledctrl one at a time, in order (ledq.c says why), or into HASSMIC_FAKE_LED's file for
  * the tests on the PC, through the same queue (ledq_start in main) */
@@ -330,7 +356,8 @@ void core_set_state(enum state s)
      * "ready-timer-short" once on FOCUS_ENTERED_BACKGROUND, then the pipeline's own patterns cover "ready-timer" */
     if (state == IDLE && atomic_load(&alarm_on)) led("-s", "ready-timer-short");
     led_for(state, s);
-    state = s; state_since = time(NULL);
+    state = s;
+    atomic_store(&state_since_ms, mono_ms()); atomic_store(&state_seen, s);
     atomic_store(&busy, s != IDLE);
 }
 
@@ -2203,16 +2230,18 @@ float core_lux(void)
  * pulled back too.
  * The mixer's global Mute silences every stream whatever the volumes say, and it persists across reboots: stock Alexa
  * ("Alexa, mute") can leave it set, and then nothing plays.  Nothing of ours uses it (the mic button is a hardware latch,
- * a player mute from Music Assistant is ours in software), so a set Mute is cleared. */
-static void volume_sync(void)
+ * a player mute from Music Assistant is ours in software), so a set Mute is cleared.
+ * Each read is a process (audio_manager_get_prop): three every 2 s, for ever, was most of what hassmic forked.  Now MainVolume, the one people
+ * move, every 2 s; Mute and TTSVolume, which only a stock daemon moves, once a minute (full), and TTSVolume is set again whenever MainVolume moved. */
+static void volume_sync(int full)
 {
     int main_v, tts_v;
-    if (read_prop_volume("Mute", 0) != 0) { fprintf(stderr, "speaker: global Mute was set, clearing it\n"); set_prop_volume("Mute", 0); }
+    if (full && read_prop_volume("Mute", 0) != 0) { fprintf(stderr, "speaker: global Mute was set, clearing it\n"); set_prop_volume("Mute", 0); }
     pthread_mutex_lock(&core_lock);
     int cur = core_volume(), want = mix_target();
     pthread_mutex_unlock(&core_lock);
     main_v = read_prop_volume("MainVolume", want);
-    tts_v = read_prop_volume("TTSVolume", want);
+    tts_v = full || vol_split ? read_prop_volume("TTSVolume", want) : speaker_mode == SPEAKER_ABSOLUTE ? 100 : want;   /* not asked: taken as ours (separate volumes: the mixer follows the loudest, so a strayed one is mended within 2 s) */
     pthread_mutex_lock(&core_lock);
     if (speaker_mode == SPEAKER_ABSOLUTE) {                         /* 100 is ours: only a stray TTSVolume to mend */
         if (main_v == 100 && tts_v != 100) { tts_written = -1; mix_apply(); }
@@ -2272,7 +2301,7 @@ static void *volume_led_thread(void *arg)
     int tick = 0;
     (void)arg;
     while (!atomic_load(&quit)) {
-        if (++tick % 10 == 0) { volume_sync(); music_volume_write(); }
+        if (tick++ % 10 == 0) { volume_sync(tick % 300 == 1); music_volume_write(); }      /* 2 s; full every minute, first at start */
         fake_speaker();                                 /* tests only: at once, as btout.c tells it on the Echo */
         long long at = atomic_load(&vol_clear_at);
         if (at && mono_ms() >= at) {
@@ -2447,15 +2476,23 @@ static void *capture_thread(void *arg)
         }
         if (arb_due && (mono_ms() >= arb_due || arb_settled())) { arb_due = 0; if (arb_decide()) answer(arb_from); else { afe_done(); wake_tell("answered_elsewhere"); } }    /* after this block went out live */
 
-        pthread_mutex_lock(&core_lock);
-        if (core_local_wake && (state == LISTENING || state == THINKING) && time(NULL) - state_since > PIPELINE_TIMEOUT) {
-            fprintf(stderr, "pipeline timeout\n");
-            core_pipeline_finish();
-        }
-        pthread_mutex_unlock(&core_lock);
+        /* the lock only when it is due: every block (30 ms) it would wait for whoever holds it, and the wake word hears nothing meanwhile */
+        { int st = atomic_load(&state_seen);
+          if (core_local_wake && (st == LISTENING || st == THINKING) && mono_ms() - atomic_load(&state_since_ms) > PIPELINE_TIMEOUT * 1000LL) {
+              pthread_mutex_lock(&core_lock);
+              if ((state == LISTENING || state == THINKING) && mono_ms() - atomic_load(&state_since_ms) > PIPELINE_TIMEOUT * 1000LL) {
+                  fprintf(stderr, "pipeline timeout\n");
+                  core_pipeline_finish();
+              }
+              pthread_mutex_unlock(&core_lock);
+          } }
     }
     return NULL;
 }
+
+#define CONN_SEQ_FDS 1024
+static atomic_ullong conn_seq_at[CONN_SEQ_FDS], conn_seq_next;
+unsigned long long core_conn_seq(int fd) { return fd >= 0 && fd < CONN_SEQ_FDS ? atomic_load(&conn_seq_at[fd]) : 0; }
 
 static void *serve_thread(void *arg) { int c = (int)(long)arg; proto->serve(c); netaddr_link(c, 0); close(c); return NULL; }
 
@@ -2614,6 +2651,7 @@ int main(int argc, char **argv)
           setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv); setsockopt(c, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
           setsockopt(c, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle); setsockopt(c, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
           setsockopt(c, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt); setsockopt(c, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_ms, sizeof user_ms); }
+        if (c < CONN_SEQ_FDS) atomic_store(&conn_seq_at[c], atomic_fetch_add(&conn_seq_next, 1) + 1);
         netaddr_link(c, 1);
         if (proto->threaded) {
             pthread_t t;

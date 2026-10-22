@@ -67,6 +67,9 @@ void core_reset(const char *why);
 /* Restart the whole Echo, as a power cycle does: root reboots on state/reboot (main.sh).  why: for the log.  Any thread */
 void core_reboot(const char *why);
 extern int core_local_wake, core_port, core_sendspin_port, core_web_port;
+/* The order connections were accepted in (1, 2, ...), 0 for an fd that is none: threads that serve them start in any order, and "the newest
+ * wins" has to mean the one that connected last, not the one whose thread got there last */
+unsigned long long core_conn_seq(int fd);
 
 /* lock held, except core_state: any thread may read it without the lock as a snapshot (the music players duck by it
  * every 10 ms and must not wait behind the volume helpers that hold the lock); acting on it needs the lock */

@@ -17,6 +17,7 @@
 #define OUTQ_BEHIND (64 * 1024)
 
 static int client = -1;                 /* lock held */
+static unsigned long long client_seq;   /* lock held: when it was accepted (core_conn_seq) */
 static struct outq *client_q;           /* lock held: its outgoing queue, owned by its serve() */
 
 /* lock held.  Only queued: the client's writer thread sends it, so a stalled link holds up nobody.  droppable: mic audio,
@@ -121,9 +122,15 @@ static void serve(int fd)
     if (!ev || wy_reader_init(&rd, fd) < 0) { free(ev); return; }
     /* The claim comes first and the queue (a thread) after it: a client that connects right behind a probe that closes at once must not be
      * pushed out by the probe's serve() being the slower of the two to get here */
+    unsigned long long seq = core_conn_seq(fd);
     pthread_mutex_lock(&core_lock);
+    if (client >= 0 && client_seq > seq) {              /* a connection accepted after this one has been served first: it is the newest */
+        pthread_mutex_unlock(&core_lock);
+        wy_reader_free(&rd); free(ev);
+        return;
+    }
     if (client >= 0) { fprintf(stderr, "client replaced by a new connection\n"); shutdown(client, SHUT_RDWR); end_open_stream(); }
-    client = fd; client_q = NULL; core_link(1, 0);
+    client = fd; client_seq = seq; client_q = NULL; core_link(1, 0);
     pthread_mutex_unlock(&core_lock);
     q = outq_open(fd, OUTQ_LIMIT, OUTQ_BEHIND);
     pthread_mutex_lock(&core_lock);

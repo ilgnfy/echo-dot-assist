@@ -38,9 +38,14 @@ async def refused(env):
         await asyncio.sleep(0.3)
         r, w = await asyncio.open_connection("127.0.0.1", PORT + 1)
         w.write(b'{"type": "describe"}\n')
-        assert await asyncio.wait_for(r.read(), 2) == b"", "a peer outside -A was answered"
+        try: got = await asyncio.wait_for(r.read(), 2)
+        except ConnectionResetError: got = b""             # closed with our describe unread: a reset is as good as a close
+        assert got == b"", "a peer outside -A was answered"
         w.close()
-        text = open(log).read()
+        for _ in range(40):                                # the log reader process writes a moment after the line is printed
+            text = open(log).read()
+            if "refused: not in -A" in text: break
+            await asyncio.sleep(0.05)
         assert "connection from 127.0.0.1 refused: not in -A" in text and "client connected" not in text, text
         print("ok   a peer outside -A (192.168.99.1,10.0.0.0/8) is refused at accept")
     finally:
