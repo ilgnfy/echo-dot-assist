@@ -67,8 +67,6 @@ static long long now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC
 
 /* shairport-sync's configuration (libconfig): the name people see, ports in the admitted range, the FIFO, and how early it
  * must hand out audio for the speaker's own delay (the mixer queue and the output) */
-/* The sender's volume slider is ignored: with it applied (shairport-sync starts at -20 dB) AirPlay came out far quieter than Bluetooth or Music
- * Assistant at the same Echo volume, and the Echo has its own volume (buttons, Home Assistant) that every music source follows. */
 static int write_conf(void)
 {
     struct statefile f;
@@ -76,7 +74,7 @@ static int write_conf(void)
     fprintf(f.f,
         "general = {\n  name = \"%s\";\n  port = %d;\n  udp_port_base = %d;\n  udp_port_range = %d;\n  output_backend = \"pipe\";\n"
         "  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
-        "  ignore_volume_control = \"yes\";\n};\n"
+        "  ignore_volume_control = \"no\";\n};\n"
         "pipe = {\n  name = \"%s\";\n  output_format = \"S16\";\n  output_rate = %d;\n  output_channels = 2;\n};\n"   /* the backend's own section: from general they are ignored and AirPlay 2 gives S32 at 48 kHz */
         "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
         "diagnostics = {\n  log_verbosity = 2;\n};\n",
