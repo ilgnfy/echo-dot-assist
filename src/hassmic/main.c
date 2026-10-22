@@ -75,7 +75,12 @@
 static const char *const state_names[] = { "idle", "listening", "thinking", "speaking" };
 static int use_led = 1, use_earcon = 1, use_volume = 1, use_bt_announce = 1, use_bt = 1;
 static atomic_int sounds_pending;
-static void sound_queue(enum sound s) { atomic_fetch_or(&sounds_pending, 1 << s); }                          /* played by the earcon thread */
+/* The earcon thread sleeps until something is asked of it (it polled every 20 ms, for ever): ear_wake() after anything it plays or rings */
+static pthread_mutex_t ear_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ear_cond = PTHREAD_COND_INITIALIZER;
+static int ear_poke;
+static void ear_wake(void) { pthread_mutex_lock(&ear_lock); ear_poke = 1; pthread_cond_signal(&ear_cond); pthread_mutex_unlock(&ear_lock); }
+static void sound_queue(enum sound s) { atomic_fetch_or(&sounds_pending, 1 << s); ear_wake(); }      /* played by the earcon thread */
 static void sound_request(enum sound s) { if (use_earcon) sound_queue(s); }
 
 const char *core_name;                  /* name_make(), or -n (the PC) */
@@ -398,7 +403,9 @@ static const char *wake_m_arg;                      /* -m */
 static int wake_cmdline_remote;                     /* -w remote: hassmic.conf decides, not the settings page */
 static int wake_next = -1;                          /* asked for, takes effect with the restart */
 static const char *wake_refused = "";
+static atomic_int wake_reset_pending;               /* capture thread: wake_reset() before the next block */
 static atomic_int wake_switch;                      /* capture thread: load the active ones */
+static atomic_int wake_reset_pending;               /* capture thread: wake_reset() before the next block (it feeds the decoder; this runs on any thread) */
 static char wake_loaded[WAKE_SLOTS][64];            /* under core_lock: the names of the ones loaded, by slot ("": none) */
 static char wake_phrase[64];                        /* under core_lock: the one that started the run ("": the first) */
 
@@ -784,6 +791,7 @@ void core_dropin(int st, const char *peer, int outgoing)
         /* the caller's ringtone only after a second: an Echo that connects at once (answer: auto) is in before that */
         atomic_store(&dropin_ring_at, mono_ms() + (st == DROPIN_CALLING ? 1000 : 0));
         atomic_store(&dropin_ring, st == DROPIN_RINGING ? SND_RING_IN : st == DROPIN_CALLING ? SND_RING_OUT : -1);
+        ear_wake();
         if (st == DROPIN_LIVE) sound_queue(outgoing || was == DROPIN_RINGING ? SND_CALL_ON : SND_DROPIN);
         else if (st == DROPIN_IDLE) sound_queue(SND_CALL_OFF);
         atomic_store(&dropin_live, st == DROPIN_LIVE);
@@ -939,7 +947,7 @@ void core_pipeline_finish(void)
     if (atomic_exchange(&streaming, 0) && connected && proto->stop) proto->stop();
     mic_stopped();
     core_set_state(IDLE);
-    if (mono_ms() - last_wake_ms > 3000) wake_reset();      /* a reset puts the engine back to sleep: "<wake word>, stop" would lose its "stop" */
+    if (mono_ms() - last_wake_ms > 3000) atomic_store(&wake_reset_pending, 1);    /* a reset puts the engine back to sleep: "<wake word>, stop" would lose its "stop" */
     if (!connected) barge_in = 0;
     if ((barge_in || !core_local_wake) && satellite_running && connected) {
         if (barge_in) sound_request(SND_WAKE);
@@ -1559,6 +1567,7 @@ static atomic_llong alarm_until;                                /* mono_ms the r
 static void alarm_set(int on)          /* lock held */
 {
     if (atomic_exchange(&alarm_on, on) == on) return;
+    ear_wake();
     /* Stock's own (PuffinApp UXEventArbitrator::onAlertStateChange): "ready-timer" for timers and reminders from the
      * alert's start until it stops, layer 3, so listening and replies show over it and it comes back after them.
      * "active_timer" has a file but no entry in layer_config_common.json on any model: ledcontroller refuses it
@@ -1712,6 +1721,20 @@ static short *scaled(const short *pcm, size_t n, int q16)
 static int ring_sound;
 static int ring_go(void) { return atomic_load(&dropin_ring) == ring_sound && !atomic_load(&sounds_pending); }
 
+/* Until woken (ear_wake / a sound asked for) or ms have passed; ms < 0: until woken */
+static void ear_sleep(int ms)
+{
+    struct timespec until;
+    if (ms >= 0) { clock_gettime(CLOCK_REALTIME, &until); until.tv_nsec += ms * 1000000L; until.tv_sec += until.tv_nsec / 1000000000L; until.tv_nsec %= 1000000000L; }
+    pthread_mutex_lock(&ear_lock);
+    while (!ear_poke && !atomic_load(&sounds_pending)) {
+        if (ms >= 0) { if (pthread_cond_timedwait(&ear_cond, &ear_lock, &until)) break; }
+        else pthread_cond_wait(&ear_cond, &ear_lock);
+    }
+    ear_poke = 0;
+    pthread_mutex_unlock(&ear_lock);
+}
+
 static void *earcon_thread(void *arg)
 {
     enum { RATE = 48000, N = RATE * 12 / 100 };
@@ -1755,11 +1778,13 @@ static void *earcon_thread(void *arg)
                 short *quiet = scaled(tone, N, atomic_load(&timers_q16));
                 for (int k = 0; k < 3; k++) play_earcon(quiet ? quiet : tone, N, RATE);
                 free(quiet);
-                usleep(800000);
+                ear_sleep(800);                 /* a sound asked for meanwhile does not wait it out */
             }
             /* in the background while a pipeline runs: speech to text must hear the user, not the ring */
         }
-        usleep(20000);
+        /* Asleep until asked, except while something rings: a ring waits for the pipeline to end (busy has no wake-up of its own) or for its
+         * time, and a Drop In ringtone for its second */
+        ear_sleep(atomic_load(&alarm_on) || atomic_load(&dropin_ring) >= 0 ? 100 : -1);
     }
     return NULL;
 }
@@ -2436,6 +2461,7 @@ static void *capture_thread(void *arg)
         if (dump) fwrite(pcm, 1, n, dump);
 
         if (core_local_wake && atomic_exchange(&wake_switch, 0)) wake_load();     /* another wake word, engine or model */
+        if (core_local_wake && atomic_exchange(&wake_reset_pending, 0)) wake_reset();
         if (core_local_wake) { ring_put(pcm, n / 2); wake_feed(pcm, n / 2); }
         if (atomic_load(&sound_want) != sound_running) {           /* Home Assistant switched sound detection */
             if (!sound_running) {
