@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "airplay.h"
 #include "audio.h"
+#include "btout.h"
 #include "core.h"
 #include "statefile.h"
 #include "threadname.h"
@@ -35,7 +36,14 @@
 #define UDP_BASE 28940
 #define UDP_RANGE 40
 
-static atomic_int enabled, delay_ms = 250, playing, yield_req;
+/* Output latency of the mixer's Music stream after our write (mixer, DAC, amp): sendspin.c measured 83..88 ms with src/tools/latency.c
+ * including the capture path, ~70 ms without; HASSMIC_OUTPUT_LATENCY_MS as there. */
+#ifndef F_SETPIPE_SZ
+#define F_SETPIPE_SZ 1031
+#endif
+#define OUT_LATENCY_MS 70
+#define FIFO_BYTES 4096             /* the pipe's own buffer: 23 ms, so its fill is not a latency of its own (the default 64 KB would be 370 ms) */
+static atomic_int enabled, delay_ms, playing, yield_req, conf_total_ms;
 static atomic_int child_pid;
 static char fifo_path[300], conf_path[300];
 
@@ -59,6 +67,15 @@ static const char *binary(void)
 
 int airplay_present(void) { return access(binary(), X_OK) == 0; }
 int airplay_enable(int set) { if (set >= 0) atomic_store(&enabled, set != 0); return atomic_load(&enabled); }
+/* What lies between shairport-sync's write and the sound: the mixer queue kept near its target (writes wait for it to fall under it), the
+ * FIFO half full, the output and a Bluetooth speaker's buffer.  Shairport-sync is told to hand audio out that much early, plus the
+ * setting's trim; this is what a fixed number measured by ear used to guess. */
+static int total_ms(void)
+{
+    const char *e = getenv("HASSMIC_OUTPUT_LATENCY_MS");
+    int out = e ? atoi(e) : OUT_LATENCY_MS;
+    return (MIXER_TARGET_US - 10000) / 1000 + FIFO_BYTES / 2 * 1000 / (RATE * 2 * CHANNELS) + out + (int)(btout_latency_us() / 1000) + atomic_load(&delay_ms);
+}
 int airplay_delay(int set) { if (set != INT_MIN) atomic_store(&delay_ms, set); return atomic_load(&delay_ms); }
 int airplay_playing(void) { return atomic_load(&playing); }
 void airplay_yield(void) { if (atomic_load(&playing)) atomic_store(&yield_req, 1); }
@@ -67,6 +84,7 @@ static long long now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC
 
 /* shairport-sync's configuration (libconfig): the name people see, ports in the admitted range, the FIFO, and how early it
  * must hand out audio for the speaker's own delay (the mixer queue and the output) */
+static int conf_total_ms_set(void) { int t = total_ms(); atomic_store(&conf_total_ms, t); return t; }
 static int write_conf(void)
 {
     struct statefile f;
@@ -78,7 +96,7 @@ static int write_conf(void)
         "pipe = {\n  name = \"%s\";\n  output_format = \"S16\";\n  output_rate = %d;\n  output_channels = 2;\n};\n"   /* the backend's own section: from general they are ignored and AirPlay 2 gives S32 at 48 kHz */
         "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
         "diagnostics = {\n  log_verbosity = 2;\n};\n",
-        core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, -atomic_load(&delay_ms) / 1000.0, fifo_path, RATE);
+        core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, -conf_total_ms_set() / 1000.0, fifo_path, RATE);
     return statefile_commit(&f);
 }
 
@@ -129,6 +147,7 @@ static void *supervisor(void *arg)
         pid_t pid = atomic_load(&child_pid);
         if (atomic_exchange(&yield_req, 0) && pid > 0) { child_stop("another source plays"); next = now_ms() + 1000; pid = 0; }
         if (!want && pid > 0) { child_stop("switched off"); pid = 0; }
+        if (pid > 0 && !atomic_load(&playing) && total_ms() != atomic_load(&conf_total_ms)) { child_stop("delay changed"); next = now_ms(); pid = 0; }
         if (pid > 0) {
             int st;
             if (waitpid(pid, &st, WNOHANG) == pid) {
@@ -148,11 +167,12 @@ static void *reader(void *arg)
 {
     static char buf[4096];
     size_t have = 0;                        /* bytes of a frame the last read ended in the middle of: dropping them would shift every sample after */
-    int fd = -1, open_music = 0;
+    int fd = -1, open_music = 0, sized = 0;
     (void)arg;
     thread_name("airplay-audio");
     for (;;) {
         if (fd < 0 && (fd = open(fifo_path, O_RDONLY | O_NONBLOCK)) < 0) { sleep(2); continue; }
+        if (fd >= 0 && !sized) sized = fcntl(fd, F_SETPIPE_SZ, FIFO_BYTES) >= 0;
         struct pollfd p = { fd, POLLIN, 0 };
         int r = poll(&p, 1, GAP_MS);
         if (r > 0 && (p.revents & POLLIN)) {

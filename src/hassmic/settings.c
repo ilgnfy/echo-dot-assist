@@ -110,9 +110,9 @@ static const struct setting table[NSET] = {
     [DROPIN_ANSWER] = { "drop_in_answer", "Drop In answers", "Features", NULL, S_CHOICE, 0, 0, 1, 0 },
     /* https.c keeps it: media from a Home Assistant that serves HTTPS itself (issue #30) */
     /* airplay.c keeps them in memory, state/config on disk (root's main.sh and lockdown.sh read "airplay=on" there: nqptp, UDP 319/320).
-     * The delay is the Echo's own (mixer queue and speaker), found by ear against another AirPlay speaker: not exported */
+     * The delay is a trim on the latency hassmic works out itself (mixer queue, FIFO, speaker, Bluetooth speaker); not exported */
     [AIRPLAY]     = { "airplay", "AirPlay 2", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
-    [AIRPLAY_DELAY] = { "airplay_delay", "AirPlay delay", "Features", "ms", S_INT, 0, 1000, 0, 0 },
+    [AIRPLAY_DELAY] = { "airplay_delay", "AirPlay delay", "Features", "ms", S_INT, -500, 500, 0, 0 },
     [HTTPS_VERIFY] = { "https_verify", "Check HTTPS certificates", "System", NULL, S_BOOL, 0, 1, 1, 0 },
     [SS_UNPAIRED] = { "sendspin_unpaired", "Music Assistant without pairing", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
     [EQ_BASS]     = { "equalizer_bass", "Equalizer bass", "Sound", "dB", S_INT, -6, 6, 1, 0 },

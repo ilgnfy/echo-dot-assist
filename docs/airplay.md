@@ -31,9 +31,13 @@ has a 4-byte lock and the program stops at start with "gpgrt fatal: sizeof lock 
 
 ## Delay
 
-The audio reaches the mixer through a queue of 120 ms (as Sendspin's) and then the speaker. shairport-sync is told to hand audio out
-early by the setting "AirPlay delay" (`audio_backend_latency_offset_in_seconds`), 250 ms to start with: to be found by ear against a
-second AirPlay speaker playing the same song (not measured yet, PLAN.md).
+AirPlay 2 itself keeps every speaker on one clock (PTP, nqptp) and every sender tells the receivers when each sample is due, so nothing is
+tuned per song. What the receiver has to know is how long its own output takes, and hassmic works that out (`airplay.c` `total_ms`):
+the mixer queue kept near 110 ms (writes wait for it to fall under 120 ms, as Sendspin's), the FIFO between shairport-sync and hassmic
+cut to one page (4 KB, 23 ms; the default 64 KB held 370 ms and was the biggest error of the first version), the mixer, DAC and amp
+(70 ms, `src/tools/latency.c`, as Sendspin) and, with a Bluetooth speaker, its buffer (`btout_latency_us`). shairport-sync gets the sum as
+`audio_backend_latency_offset_in_seconds`, i.e. it hands the audio out that much early. The setting "AirPlay delay" is only a trim on top
+(0 by default); it, or a Bluetooth speaker coming or going, restarts the receiver at the next pause.
 
 ## Security
 

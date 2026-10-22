@@ -18,15 +18,15 @@ async def main(e):
     conf = os.path.join(e.state, "airplay.conf")
     sw = by.get("airplay_2")
     check(isinstance(sw, SwitchInfo) and e.pv("airplay") == 0 and not os.path.exists(conf + ".pid"), "AirPlay off by default: the switch is there, no receiver runs")
-    check(e.pv("airplay_delay") == 250, "the delay starts at 250 ms")
+    check(e.pv("airplay_delay") == 0, "the trim starts at 0 ms")
     e.page.set(airplay="on")                                   # a feature: Home Assistant's link is closed, it lists again
     await until(lambda: os.path.exists(conf + ".pid"), 8)
     check(os.path.exists(conf + ".pid") and e.conf().get("airplay") == "on", f"switched on from Home Assistant: the receiver runs, kept in the settings: {e.conf().get('airplay')}")
     seen = open(conf + ".seen").read()
     ports = [int(x) for x in re.findall(r"(?:port|udp_port_base) = (\d+)", seen)]
     check('name = "Echo Dot"' in seen and ports and all(16384 <= p <= 32767 for p in ports) and "udp_port_range = 40" in seen
-          and "audio_backend_latency_offset_in_seconds = -0.250" in seen and 'output_rate = 44100' in seen,
-          f"its configuration: the Echo's name, ports {ports} in the admitted range, the latency offset from the delay")
+          and "audio_backend_latency_offset_in_seconds = -0.191" in seen and 'output_rate = 44100' in seen,
+          f"its configuration: the Echo's name, ports {ports} in the admitted range, the latency offset worked out (110 + 11 + 70 ms)")
     check(os.path.exists(os.path.join(AVAHI, "airplay-raop.service")) and os.path.exists(os.path.join(AVAHI, "airplay-ap2.service")), "its mDNS records are there")
     check(os.stat(os.path.join(e.state, "airplay.pipe")).st_mode & 0o777 == 0o600, "the FIFO is the daemon's alone (0600)")
     # a sender plays
