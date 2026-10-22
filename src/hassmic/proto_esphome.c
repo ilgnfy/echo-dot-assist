@@ -71,6 +71,7 @@
 #include "a2dp.h"
 #include "adbwifi.h"
 #include "airplay.h"
+#include "apmeta.h"
 #include "improv.h"
 #include "alarms.h"
 #include "arb.h"
@@ -136,7 +137,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_BT_AAC, KEY_BT_SECURE,
        KEY_ALARM_ON, KEY_ALARM_TIME = KEY_ALARM_ON + ALARM_SLOTS, KEY_ALARM_REPEAT = KEY_ALARM_TIME + ALARM_SLOTS,
        KEY_ALARM_STOP = KEY_ALARM_REPEAT + ALARM_SLOTS, KEY_ALARM_SNOOZE, KEY_ALARM_RINGING, KEY_ALARM_EVENT, KEY_ALARM_NEXT,
-       KEY_MEM_USED, KEY_MEM_AVAIL, KEY_LOAD, KEY_SELF_CPU, KEY_SELF_RSS, KEY_TOP, KEY_THREADS, KEY_LAST_KILL, KEY_KILL_SERVICE, KEY_AIRPLAY, KEY_IMPROV };
+       KEY_MEM_USED, KEY_MEM_AVAIL, KEY_LOAD, KEY_SELF_CPU, KEY_SELF_RSS, KEY_TOP, KEY_THREADS, KEY_LAST_KILL, KEY_KILL_SERVICE, KEY_AIRPLAY, KEY_IMPROV, KEY_AP_TITLE, KEY_AP_ARTIST, KEY_AP_ALBUM };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_PLAY = 0, MP_CMD_PAUSE = 1, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -635,6 +636,7 @@ static int listed(int key)
     case KEY_SENDSPIN_TOKEN: case KEY_SS_UNPAIRED: return core_sendspin_port != 0;
     case KEY_SOUND: return settings_on("sound_detection");
     case KEY_AIRPLAY: return airplay_present();
+    case KEY_AP_TITLE: case KEY_AP_ARTIST: case KEY_AP_ALBUM: return airplay_present() && airplay_enable(-1);
     case KEY_IMPROV: return ble_present();
     case KEY_WAKE: return settings_on("wake_events");
     case KEY_BT_PAIRING: return ble_present() && settings_on("bluetooth_audio");
@@ -786,6 +788,11 @@ static void send_setting_entities(void)
     /* AirPlay 2 (airplay.c): the switch; off by default, the receiver and its mDNS records exist only while on */
     if (listed(KEY_IMPROV)) { PB(b, 160); pb_str(&b, 1, "wifi_setup_over_bluetooth"); pb_fixed32(&b, 2, KEY_IMPROV); pb_str(&b, 3, "Wi-Fi setup over Bluetooth");
       pb_str(&b, 5, "mdi:wifi-cog"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    if (listed(KEY_AP_TITLE)) {                 /* text sensors: the media player entity of ESPHome carries no title, artist or album */
+        static const struct { const char *id, *name, *icon; int key; } np[] = { { "airplay_title", "AirPlay title", "mdi:music-note", KEY_AP_TITLE },
+            { "airplay_artist", "AirPlay artist", "mdi:account-music", KEY_AP_ARTIST }, { "airplay_album", "AirPlay album", "mdi:album", KEY_AP_ALBUM } };
+        for (int i = 0; i < 3; i++) { PB(b, 160); pb_str(&b, 1, np[i].id); pb_fixed32(&b, 2, np[i].key); pb_str(&b, 3, np[i].name); pb_str(&b, 5, np[i].icon); send_msg(LIST_TEXT_SENSOR, &b); }
+    }
     if (listed(KEY_AIRPLAY)) { PB(b, 128); pb_str(&b, 1, "airplay_2"); pb_fixed32(&b, 2, KEY_AIRPLAY); pb_str(&b, 3, "AirPlay 2");
       pb_str(&b, 5, "mdi:apple-airplay"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     /* Sound detection (sound.h): the switch (off by default: a second decoder on the mic stream) */
@@ -1067,7 +1074,15 @@ static void send_mp_state(void)         /* lock held */
 
 /* A music source began or ended playing: the entity is "playing" while one does, so an automation or a voice command ("stop the music" finds the media
  * player that is playing) sees it, and its pause and stop reach it (on_mp_command) */
-void esphome_media_changed(void) { send_mp_state(); }
+static void send_ap_meta(void)          /* lock held: what AirPlay plays, as three text sensors (the media player entity has no title) */
+{
+    char t[APMETA_TEXT], a[APMETA_TEXT], l[APMETA_TEXT];
+    if (!listed(KEY_AP_TITLE)) return;
+    airplay_meta(t, a, l);
+    send_text(KEY_AP_TITLE, t); send_text(KEY_AP_ARTIST, a); send_text(KEY_AP_ALBUM, l);
+}
+
+void esphome_media_changed(void) { send_mp_state(); send_ap_meta(); }
 
 static int http_get_host(const char *host, const char *port, const char *path)
 {
@@ -1765,7 +1780,7 @@ static int handle(unsigned type, const unsigned char *p, size_t len)
     case LIST_ENTITIES_REQ: send_entities(); break;
     case SUBSCRIBE_STATES:
         for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd == reply_fd) clients[i].states = 1;
-        send_mp_state(); send_all_settings(); send_token_state(); send_web_state();
+        send_mp_state(); send_ap_meta(); send_all_settings(); send_token_state(); send_web_state();
         ask_time(c, 1); break;
     case GET_TIME_RESP: {
         uint32_t epoch = 0; char tz[128] = "";

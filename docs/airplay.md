@@ -53,7 +53,22 @@ cut to one page (4 KB, 23 ms; the default 64 KB held 370 ms and was the biggest 
 
 The Echo's media player entity says *playing* while AirPlay plays (`core_airplay_changed` -> `esphome_media_changed`), and advertises `supports_pause`, so Home Assistant's
 voice commands ("stop the music", "pause") and automations find it. Its pause and stop commands drop the AirPlay sender (`airplay_yield`: the phone shows
-"disconnected"; AirPlay has no pause that a receiver can ask for) and the entity goes idle at once. No title, artist or cover art: ESPHome's media player entity carries none.
+"disconnected"; AirPlay has no pause that a receiver can ask for) and the entity goes idle at once. The entity itself carries no title, artist or cover art (ESPHome's media player has no field for them). Title, artist and album come from shairport-sync's metadata pipe (`apmeta.c`
+parses it; the cover art is not asked for) and are three text sensors beside it, "AirPlay title", "AirPlay artist" and "AirPlay album", while AirPlay is on and empty when nothing plays (not every sender
+gives them: Music and Spotify do, a browser tab may not). To see them *in* the media player card, Home Assistant's universal media player can put them on top of the Echo's player:
+
+```yaml
+media_player:
+  - platform: universal
+    name: Echo Dot
+    children: [media_player.echo_dot_3_d13244_media_player]
+    attributes:
+      media_title: sensor.echo_dot_3_d13244_airplay_title
+      media_artist: sensor.echo_dot_3_d13244_airplay_artist
+      media_album_name: sensor.echo_dot_3_d13244_airplay_album
+```
+
+(The entity ids are yours: look them up on the Echo's device page.)
 
 ## Security
 

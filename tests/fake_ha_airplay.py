@@ -5,7 +5,7 @@ and the Echo's name, a sender's audio reaches the music stream, a gap ends it, a
 sender (the child restarts), switched off stops the child and takes its mDNS records out."""
 import asyncio, os, re, sys, tempfile, time
 from esphome_common import check, until, sync, home_assistant, run, ROOT
-from aioesphomeapi import SwitchInfo, SwitchState, MediaPlayerEntityState, MediaPlayerCommand
+from aioesphomeapi import SwitchInfo, SwitchState, MediaPlayerEntityState, MediaPlayerCommand, TextSensorState
 
 PORT, HTTP_PORT, WEB, HTTPS_PORT, SELF_PORT = 17131, 17132, 17133, 17134, 17135
 AVAHI = tempfile.mkdtemp()
@@ -47,6 +47,10 @@ async def main(e):
     ha2 = await home_assistant(e); mp = ha2.mp[0]
     await until(lambda: ha2.last(mp.key, MediaPlayerEntityState) == 2, 5)
     check(mp.supports_pause and ha2.last(mp.key, MediaPlayerEntityState) == 2, f"the media player entity can pause and says playing while AirPlay does: {ha2.last(mp.key, MediaPlayerEntityState)}")
+    txt = lambda k: ha2.last(ha2.by[k].key, TextSensorState)
+    await until(lambda: txt("airplay_title") == "Black Hole Sun", 5)
+    check(txt("airplay_title") == "Black Hole Sun" and txt("airplay_artist") == "Soundgarden" and txt("airplay_album") == "Superunknown",
+          f"title, artist and album from the metadata pipe, with a cover art item thrown away: {txt('airplay_title')} / {txt('airplay_artist')} / {txt('airplay_album')}")
     pid0 = open(conf + ".pid").read(); n0 = len(ha2.states)
     ha2.cli.media_player_command(mp.key, command=MediaPlayerCommand.PAUSE)
     await until(lambda: open(conf + ".pid").read() != pid0, 10)

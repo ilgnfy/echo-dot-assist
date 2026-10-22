@@ -8,6 +8,7 @@ text = open(conf).read()
 open(conf + ".seen", "w").write(text)
 open(conf + ".pid", "w").write(str(os.getpid()))
 pipe = re.search(r'pipe = \{\s*name = "([^"]+)"', text).group(1)
+meta = re.search(r'metadata = \{[^}]*pipe_name = "([^"]+)"', text).group(1)       # the metadata pipe: title, artist, album as shairport-sync words them
 d = os.environ["HASSMIC_AVAHI_DIR"]
 files = [os.path.join(d, "airplay-raop.service"), os.path.join(d, "airplay-ap2.service")]
 for f in files: open(f, "w").write("<service-group/>\n")
@@ -17,8 +18,28 @@ def bye(*a):
         except OSError: pass
     sys.exit(0)
 signal.signal(signal.SIGTERM, bye)
+import base64
+def item(typ, code, val=None):
+    h = lambda s: s.encode().hex()
+    if val is None: return f"<item><type>{h(typ)}</type><code>{h(code)}</code><length>0</length></item>\n".encode()
+    b = val.encode()
+    return f"<item><type>{h(typ)}</type><code>{h(code)}</code><length>{len(b)}</length>\n<data encoding=\"base64\">\n{base64.b64encode(b).decode()}</data></item>\n".encode()
+mfd = None; told = False
 fd = None; t = 0
 while True:
+    if os.path.exists(conf + ".play") and not told:     # a track begins: the bundle of its metadata (and a cover art item the Echo must throw away)
+        if mfd is None:
+            try: mfd = os.open(meta, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError: mfd = None
+        if mfd is not None:
+            said = open(conf + ".play").read().strip()                      # the test may put "title|artist|album" in the file
+            t3 = (said.split("|") + ["", "", ""])[:3] if said else ["Black Hole Sun", "Soundgarden", "Superunknown"]
+            try:
+                os.write(mfd, item("ssnc", "mdst") + item("core", "minm", t3[0]) + item("core", "asar", t3[1]) + item("core", "asal", t3[2]) + item("ssnc", "mden"))
+                told = True
+            except OSError: pass
+    if not os.path.exists(conf + ".play"):
+        told = False
     if os.path.exists(conf + ".play"):
         if fd is None:
             try: fd = os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)

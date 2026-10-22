@@ -6,6 +6,7 @@
  * other AirPlay 2 speakers by the clock nqptp shares.  No Apple software here; the sender may be any iPhone, Mac or app. */
 #define _GNU_SOURCE
 #include "airplay.h"
+#include "apmeta.h"
 #include "audio.h"
 #include "btout.h"
 #include "core.h"
@@ -48,7 +49,9 @@ static atomic_int enabled, delay_ms, playing, yield_req, conf_total_ms;
 static atomic_int stop_now;           /* airplay_yield: the reader ends the stream at once, not after the gap */
 static atomic_int gain_db;           /* dB: see apply_gain */
 static atomic_int child_pid;
-static char fifo_path[300], conf_path[300];
+static char fifo_path[300], meta_path[300], conf_path[300];
+static pthread_mutex_t meta_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct apmeta meta;              /* meta_lock: what plays now, from shairport-sync's metadata pipe */
 
 static const char *state_dir(void) { const char *e = getenv("HASSMIC_STATE"); return e ? e : "/data/local/hassmic/state"; }
 static const char *avahi_dir(void) { const char *e = getenv("HASSMIC_AVAHI_DIR"); return e ? e : "/data/misc/avahi/services"; }
@@ -97,6 +100,14 @@ static void apply_gain(void *buf, size_t n)
 }
 
 int airplay_delay(int set) { if (set != INT_MIN) atomic_store(&delay_ms, set); return atomic_load(&delay_ms); }
+/* title, artist and album of what plays ('' while unknown or nothing plays) */
+void airplay_meta(char *title, char *artist, char *album)
+{
+    pthread_mutex_lock(&meta_lock);
+    snprintf(title, APMETA_TEXT, "%s", meta.title); snprintf(artist, APMETA_TEXT, "%s", meta.artist); snprintf(album, APMETA_TEXT, "%s", meta.album);
+    pthread_mutex_unlock(&meta_lock);
+}
+
 int airplay_playing(void) { return atomic_load(&playing); }
 void airplay_yield(void) { if (atomic_load(&playing)) { atomic_store(&yield_req, 1); atomic_store(&stop_now, 1); } }
 
@@ -113,10 +124,11 @@ static int write_conf(void)
         "general = {\n  name = \"%s\";\n  port = %d;\n  udp_port_base = %d;\n  udp_port_range = %d;\n  output_backend = \"pipe\";\n"
         "  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
         "  ignore_volume_control = \"no\";\n};\n"
+        "metadata = {\n  enabled = \"yes\";\n  include_cover_art = \"no\";\n  pipe_name = \"%s\";\n  pipe_timeout = 5000;\n};\n"
         "pipe = {\n  name = \"%s\";\n  output_format = \"S16\";\n  output_rate = %d;\n  output_channels = 2;\n};\n"   /* the backend's own section: from general they are ignored and AirPlay 2 gives S32 at 48 kHz */
         "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
         "diagnostics = {\n  log_verbosity = 2;\n};\n",
-        core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, -conf_total_ms_set() / 1000.0, fifo_path, RATE);
+        core_name, RTSP_PORT, UDP_BASE, UDP_RANGE, -conf_total_ms_set() / 1000.0, meta_path, fifo_path, RATE);
     return statefile_commit(&f);
 }
 
@@ -221,9 +233,36 @@ static void *reader(void *arg)
             if (!(open_music && now_ms() - last_data > GAP_MS)) continue;
         }
         if (open_music) {                                                   /* a gap */
-            music_close(); open_music = 0; have = 0; atomic_store(&playing, 0); core_music(MUSIC_AIRPLAY, 0); core_airplay_changed();
+            music_close(); open_music = 0; have = 0; atomic_store(&playing, 0); core_music(MUSIC_AIRPLAY, 0);
+            pthread_mutex_lock(&meta_lock); apmeta_clear(&meta); pthread_mutex_unlock(&meta_lock);        /* what played is not what plays next */
+            core_airplay_changed();
             fprintf(stderr, "airplay: stopped\n");
         }
+    }
+    return NULL;
+}
+
+/* shairport-sync's metadata (title, artist, album as they come with the track): read from a FIFO of ours as the audio is. The cover art is not asked for.
+ * Home Assistant's ESPHome media player has no field for them: three text sensors carry them (proto_esphome.c) */
+static void *meta_reader(void *arg)
+{
+    static char buf[1024];
+    static struct apmeta_parser parser;
+    int fd = -1;
+    (void)arg;
+    thread_name("airplay-meta");
+    for (;;) {
+        if (fd < 0 && (fd = open(meta_path, O_RDONLY | O_NONBLOCK)) < 0) { sleep(2); continue; }
+        struct pollfd p = { fd, POLLIN, 0 };
+        int r = poll(&p, 1, 1000);
+        if (r > 0 && (p.revents & POLLIN)) {
+            ssize_t n = read(fd, buf, sizeof buf);
+            if (n > 0) {
+                int ch;
+                pthread_mutex_lock(&meta_lock); ch = apmeta_feed(&parser, &meta, buf, (size_t)n); pthread_mutex_unlock(&meta_lock);
+                if (ch) core_airplay_changed();
+            } else if (n == 0) usleep(100000);
+        } else if (r > 0) usleep(200000);                       /* no writer (yet, or any more) */
     }
     return NULL;
 }
@@ -233,8 +272,10 @@ void airplay_init(void)
     pthread_t t;
     snprintf(fifo_path, sizeof fifo_path, "%s/airplay.pipe", state_dir());
     snprintf(conf_path, sizeof conf_path, "%s/airplay.conf", state_dir());
-    unlink(fifo_path);
+    snprintf(meta_path, sizeof meta_path, "%s/airplay.meta", state_dir());
+    unlink(fifo_path); unlink(meta_path);
     if (mkfifo(fifo_path, 0600)) { fprintf(stderr, "airplay: cannot make %s: %s\n", fifo_path, strerror(errno)); return; }
+    if (!mkfifo(meta_path, 0600) && !pthread_create(&t, NULL, meta_reader, NULL)) pthread_detach(t);
     if (!pthread_create(&t, NULL, reader, NULL)) pthread_detach(t);
     if (!pthread_create(&t, NULL, supervisor, NULL)) pthread_detach(t);
 }

@@ -7,6 +7,7 @@ int  airplay_present(void);             /* the receiver is installed next to has
 int  airplay_enable(int set);           /* -1: ask; 0/1: set (the setting "airplay", saved by settings.c) */
 int  airplay_gain(int set);             /* dB, 0..12, on AirPlay's audio only, with a limiter; INT_MIN: ask */
 int  airplay_delay(int set);            /* trim in ms on top of the latency worked out from the mixer queue, the FIFO and the output; INT_MIN: ask */
+void airplay_meta(char *title, char *artist, char *album);   /* each APMETA_TEXT bytes (apmeta.h): what plays, '' when unknown */
 int  airplay_playing(void);             /* audio is coming from a sender */
 void airplay_yield(void);               /* another music source started: drop the sender (it shows "disconnected") */
 #endif
