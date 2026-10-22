@@ -34,6 +34,11 @@ async def main(e):
     await until(lambda: os.path.exists(MUSIC) and os.path.getsize(MUSIC) > 44100 * 4 * 0.5, 10)
     sz = os.path.getsize(MUSIC) if os.path.exists(MUSIC) else 0
     check(sz > 44100 * 4 * 0.5, f"the sender's audio reaches the music stream ({sz} bytes)")
+    import struct
+    raw = open(MUSIC, "rb").read(); samples = struct.unpack(f"<{len(raw) // 2}h", raw[:len(raw) // 2 * 2])
+    peak = max(abs(v) for v in samples)
+    check(e.pv("airplay_gain") == 6 and 15000 < peak < 17000, f"AirPlay gain: +6 dB by default, the stand-in's 8000 arrives as {peak} (limiter above 22000)")
+    check("ignore_volume_control = \"yes\"" in open(conf).read(), "the sender's volume slider is ignored (always full level)")
     # a gap ends the stream; played again it starts again
     os.unlink(conf + ".play")
     await asyncio.sleep(2.5)

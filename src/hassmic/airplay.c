@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -44,6 +45,7 @@
 #define OUT_LATENCY_MS 70
 #define FIFO_BYTES 4096             /* the pipe's own buffer: 23 ms, so its fill is not a latency of its own (the default 64 KB would be 370 ms) */
 static atomic_int enabled, delay_ms, playing, yield_req, conf_total_ms;
+static atomic_int gain_db = 6;       /* dB: see apply_gain */
 static atomic_int child_pid;
 static char fifo_path[300], conf_path[300];
 
@@ -76,6 +78,24 @@ static int total_ms(void)
     int out = e ? atoi(e) : OUT_LATENCY_MS;
     return (MIXER_TARGET_US - 10000) / 1000 + FIFO_BYTES / 2 * 1000 / (RATE * 2 * CHANNELS) + out + (int)(btout_latency_us() / 1000) + atomic_load(&delay_ms);
 }
+int airplay_gain(int set) { if (set != INT_MIN) atomic_store(&gain_db, set < 0 ? 0 : set > 12 ? 12 : set); return atomic_load(&gain_db); }
+
+/* AirPlay's own boost, in dB, on top of the Echo's volume (which the voice assistant shares): sources are mastered quieter than a spoken reply, so
+ * the music needed the Echo's volume so far up that the assistant was too loud.  Peaks over 2/3 of full scale are folded with tanh instead of
+ * wrapping or clipping hard. */
+static void apply_gain(void *buf, size_t n)
+{
+    int g = atomic_load(&gain_db);
+    if (!g) return;
+    const float k = powf(10.0f, g / 20.0f), knee = 22000.0f, head = 32767.0f - knee;
+    int16_t *p = buf;
+    for (size_t i = 0; i < n / 2; i++) {
+        float y = p[i] * k, a = fabsf(y);
+        if (a > knee) y = copysignf(knee + head * tanhf((a - knee) / head), y);
+        p[i] = (int16_t)lrintf(y);
+    }
+}
+
 int airplay_delay(int set) { if (set != INT_MIN) atomic_store(&delay_ms, set); return atomic_load(&delay_ms); }
 int airplay_playing(void) { return atomic_load(&playing); }
 void airplay_yield(void) { if (atomic_load(&playing)) atomic_store(&yield_req, 1); }
@@ -92,7 +112,7 @@ static int write_conf(void)
     fprintf(f.f,
         "general = {\n  name = \"%s\";\n  port = %d;\n  udp_port_base = %d;\n  udp_port_range = %d;\n  output_backend = \"pipe\";\n"
         "  audio_backend_latency_offset_in_seconds = %.3f;\n  mdns_backend = \"external-avahi\";\n"
-        "  ignore_volume_control = \"no\";\n};\n"
+        "  ignore_volume_control = \"yes\";\n};\n"
         "pipe = {\n  name = \"%s\";\n  output_format = \"S16\";\n  output_rate = %d;\n  output_channels = 2;\n};\n"   /* the backend's own section: from general they are ignored and AirPlay 2 gives S32 at 48 kHz */
         "sessioncontrol = {\n  allow_session_interruption = \"yes\";\n  session_timeout = 60;\n};\n"
         "diagnostics = {\n  log_verbosity = 2;\n};\n",
@@ -187,7 +207,7 @@ static void *reader(void *arg)
                     fprintf(stderr, "airplay: playing\n");
                 }
                 while (music_queued_us() > MIXER_TARGET_US && !atomic_load(&yield_req)) usleep(5000);
-                if (!atomic_load(&yield_req) && n > 0) music_write(buf, (size_t)n);
+                if (!atomic_load(&yield_req) && n > 0) { apply_gain(buf, (size_t)n); music_write(buf, (size_t)n); }
                 if (have) memmove(buf, buf + n, have);
             } else if (n == 0) usleep(100000);          /* the writer left: poll reports HUP at once while no writer is there */
             continue;

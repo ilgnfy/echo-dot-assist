@@ -4,6 +4,8 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-22
 
+- **AirPlay volume**: the sender's volume slider no longer changes anything (AirPlay always arrives at full level, whoever sends), and the new setting "AirPlay gain" (0 to +12 dB, +6 by default) makes AirPlay louder than the Echo's volume alone, with a limiter against distortion. So the Echo's volume can stay where the voice assistant is comfortable.
+
 - **The satellite core cannot be stalled as easily** (from the original): a media stop while a reply is still being fetched no longer silences every reply after it until a restart; the reply queue is bounded; helper tools get a deadline; the Echo asks the volume service one question every 2 s instead of three; the sound thread sleeps instead of waking 50 times a second; Improv's button press only counts for a phone that is connected.
 
 - **Safer against hostile devices on your network** (from the original): an Echo outside the arbitration network is handled only after two beacons 9 s apart, hand-overs are spaced, one address may offer at most two keys and the Echo takes at most 8 new keys a minute, and real members are never pushed out by a flood of made-up ones; the update port turns an address away for a minute after three failed connections; `-A <addresses>` in `ARGS` limits who may connect to Wyoming (it has no authentication); a Wyoming reply a client left open is ended; sockets are not inherited by the tools hassmic starts.

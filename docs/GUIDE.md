@@ -327,7 +327,7 @@ and the action button pauses and resumes.
 - **AirPlay 2** (iPhone, iPad, Mac): switch "AirPlay 2" on (Home Assistant or the settings page; off by default). The Echo then shows up in the AirPlay
   list under its own name and keeps in step with other AirPlay 2 speakers and with video: it works out its own playback delay ("AirPlay delay" on the page
   is only a trim, 0 by default). It is one more source like the others: the newest wins, "<wake word>, stop" disconnects the sender, and the Echo's volume,
-  equalizer and separate volumes apply. Anyone on your network can play to it ([security](SECURITY.md#airplay-2)). Details: [airplay.md](airplay.md).
+  equalizer and separate volumes apply. The sender's own volume slider is ignored (AirPlay always arrives at full level, so it is the same whoever sends); the Echo's volume buttons set the loudness, and "AirPlay gain" (0 to +12 dB, +6 by default, on the settings page) makes AirPlay louder than the Echo's volume alone, so the voice assistant, which shares that volume, need not be turned up with it. Anyone on your network can play to it ([security](SECURITY.md#airplay-2)). Details: [airplay.md](airplay.md).
 - **From a phone** over Bluetooth: SBC, aptX, aptX HD, and AAC once "Bluetooth phones: AAC" is on (off by default, see [security](SECURITY.md#bluetooth)),
   with media controls. Switch on "Bluetooth audio from phones" on the settings page; the "Bluetooth phones: pairing" switch in Home Assistant then lets phones
   pair (blue chaser on the ring). iPhones prefer AAC and use SBC without it.

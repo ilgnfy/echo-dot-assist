@@ -58,7 +58,7 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 enum id { WAKE_ENGINE, MIC_LEVEL, DENOISE, WAKE_SOUND, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_STOP_ANY, BT_ANNOUNCE, BT_LANG, BT_AAC, BT_SECURE, LED_AUTO, LED_LEVEL, RING_ROT, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WAKE_EVENTS, WIFI_MOTION,
           WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, HTTPS_VERIFY, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
-          CALL_LINK, CALL_LEVEL, CALL_OFFSET, AIRPLAY, AIRPLAY_DELAY, WIFI_SETUP, NSET };
+          CALL_LINK, CALL_LEVEL, CALL_OFFSET, AIRPLAY, AIRPLAY_DELAY, AIRPLAY_GAIN, WIFI_SETUP, NSET };
 
 /* Features ("Features" group, feature = 1): Home Assistant lists their entities only while they are on (proto_esphome.c
  * listed()); everything else here is on the settings page only, except what Home Assistant always shows (wake sound,
@@ -114,6 +114,7 @@ static const struct setting table[NSET] = {
      * The delay is a trim on the latency hassmic works out itself (mixer queue, FIFO, speaker, Bluetooth speaker); not exported */
     [AIRPLAY]     = { "airplay", "AirPlay 2", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     [WIFI_SETUP]  = { "wifi_setup_bluetooth", "Wi-Fi setup over Bluetooth", "Bluetooth", NULL, S_BOOL, 0, 1, 1, 0 },
+    [AIRPLAY_GAIN]  = { "airplay_gain", "AirPlay gain", "Features", "dB", S_INT, 0, 12, 1, 0 },
     [AIRPLAY_DELAY] = { "airplay_delay", "AirPlay delay", "Features", "ms", S_INT, -500, 500, 0, 0 },
     [HTTPS_VERIFY] = { "https_verify", "Check HTTPS certificates", "System", NULL, S_BOOL, 0, 1, 1, 0 },
     [SS_UNPAIRED] = { "sendspin_unpaired", "Music Assistant without pairing", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
@@ -154,7 +155,7 @@ static int present(enum id i)
     case WIFI_MOTION: case WIFI_SENS: return wifimotion_present();
     case ARB: case ARB_MODE: case ARB_AUTO: case ARB_WINDOW: case ARB_OFFSET: return arb_running();
     case DROPIN: case DROPIN_ANSWER: return dropin_running();
-    case AIRPLAY: case AIRPLAY_DELAY: return airplay_present();
+    case AIRPLAY: case AIRPLAY_DELAY: case AIRPLAY_GAIN: return airplay_present();
     case WIFI_SETUP: return ble_present();
     case SS_UNPAIRED: return core_sendspin_port != 0;
     case SPK_GAIN: return spkgain_present();
@@ -234,6 +235,7 @@ int settings_get(const struct setting *s)
     case AIRPLAY: return airplay_enable(-1);
     case WIFI_SETUP: return improv_enable(-1);
     case AIRPLAY_DELAY: return airplay_delay(INT_MIN);
+    case AIRPLAY_GAIN: return airplay_gain(INT_MIN);
     case DROPIN_ANSWER: return dropin_ask(-1);
     case SPK_GAIN: return spkgain_get();
     case VOLUME: return core_volume();
@@ -288,6 +290,7 @@ static void put(enum id i, int v)
     case AIRPLAY: airplay_enable(v); break;
     case WIFI_SETUP: improv_enable(v); break;
     case AIRPLAY_DELAY: airplay_delay(v); break;
+    case AIRPLAY_GAIN: airplay_gain(v); break;
     case DROPIN_ANSWER: dropin_ask(v); break;
     case SPK_GAIN: spkgain_set(v); break;
     case VOLUME: core_set_volume(v); break;
