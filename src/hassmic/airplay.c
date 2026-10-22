@@ -204,7 +204,7 @@ static void *reader(void *arg)
     (void)arg;
     thread_name("airplay-audio");
     for (;;) {
-        if (fd < 0 && (fd = open(fifo_path, O_RDONLY | O_NONBLOCK)) < 0) { sleep(2); continue; }
+        if (fd < 0 && (fd = open(fifo_path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)) < 0) { sleep(2); continue; }
         if (fd >= 0 && !sized) sized = fcntl(fd, F_SETPIPE_SZ, FIFO_BYTES) >= 0;
         struct pollfd p = { fd, POLLIN, 0 };
         int r = poll(&p, 1, 200);
@@ -248,26 +248,27 @@ static void *meta_reader(void *arg)
 {
     static char buf[1024];
     static struct apmeta_parser parser;
-    int fd = -1;
+    int fd = -1, dirty = 0;
     (void)arg;
     thread_name("airplay-meta");
     for (;;) {
-        if (fd < 0 && (fd = open(meta_path, O_RDONLY | O_NONBLOCK)) < 0) { sleep(2); continue; }
+        if (fd < 0 && (fd = open(meta_path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)) < 0) { sleep(2); continue; }
         struct pollfd p = { fd, POLLIN, 0 };
-        int r = poll(&p, 1, 1000);
+        int r = poll(&p, 1, dirty ? 150 : 1000);
         if (r > 0 && (p.revents & POLLIN)) {
             ssize_t n = read(fd, buf, sizeof buf);
             if (n > 0) {
-                int ch; static unsigned long got;
+                static unsigned long got;
                 if (!got++) fprintf(stderr, "airplay: metadata arrives (%zd bytes)\n", n);
-                pthread_mutex_lock(&meta_lock); ch = apmeta_feed(&parser, &meta, buf, (size_t)n); pthread_mutex_unlock(&meta_lock);
-                if (ch) {
-                    char t[APMETA_TEXT], a[APMETA_TEXT], l[APMETA_TEXT]; airplay_meta(t, a, l);
-                    fprintf(stderr, "airplay: now playing \"%s\" by \"%s\" (%s)\n", t, a, l);
-                    core_airplay_changed();
-                }
+                pthread_mutex_lock(&meta_lock); dirty |= apmeta_feed(&parser, &meta, buf, (size_t)n); pthread_mutex_unlock(&meta_lock);
             } else if (n == 0) usleep(100000);
         } else if (r > 0) usleep(200000);                       /* no writer (yet, or any more) */
+        else if (dirty) {                                       /* a track change comes as a burst (cleared, then filled): told once it has settled */
+            char t[APMETA_TEXT], a[APMETA_TEXT], l[APMETA_TEXT]; airplay_meta(t, a, l);
+            fprintf(stderr, "airplay: now playing \"%s\" by \"%s\" (%s)\n", t, a, l);
+            dirty = 0;
+            core_airplay_changed();
+        }
     }
     return NULL;
 }
