@@ -49,6 +49,12 @@ cut to one page (4 KB, 23 ms; the default 64 KB held 370 ms and was the biggest 
 `audio_backend_latency_offset_in_seconds`, i.e. it hands the audio out that much early. The setting "AirPlay delay" is only a trim on top
 (0 by default); it, or a Bluetooth speaker coming or going, restarts the receiver at the next pause.
 
+## Home Assistant's media player
+
+The Echo's media player entity says *playing* while AirPlay plays (`core_airplay_changed` -> `esphome_media_changed`), and advertises `supports_pause`, so Home Assistant's
+voice commands ("stop the music", "pause") and automations find it. Its pause and stop commands drop the AirPlay sender (`airplay_yield`: the phone shows
+"disconnected"; AirPlay has no pause that a receiver can ask for) and the entity goes idle at once. No title, artist or cover art: ESPHome's media player entity carries none.
+
 ## Security
 
 Anyone on the network can play to an AirPlay speaker, as with every one; there is no pairing here (shairport-sync's AirPlay 2 uses

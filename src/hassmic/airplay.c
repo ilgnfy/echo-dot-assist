@@ -45,6 +45,7 @@
 #define OUT_LATENCY_MS 70
 #define FIFO_BYTES 4096             /* the pipe's own buffer: 23 ms, so its fill is not a latency of its own (the default 64 KB would be 370 ms) */
 static atomic_int enabled, delay_ms, playing, yield_req, conf_total_ms;
+static atomic_int stop_now;           /* airplay_yield: the reader ends the stream at once, not after the gap */
 static atomic_int gain_db;           /* dB: see apply_gain */
 static atomic_int child_pid;
 static char fifo_path[300], conf_path[300];
@@ -97,7 +98,7 @@ static void apply_gain(void *buf, size_t n)
 
 int airplay_delay(int set) { if (set != INT_MIN) atomic_store(&delay_ms, set); return atomic_load(&delay_ms); }
 int airplay_playing(void) { return atomic_load(&playing); }
-void airplay_yield(void) { if (atomic_load(&playing)) atomic_store(&yield_req, 1); }
+void airplay_yield(void) { if (atomic_load(&playing)) { atomic_store(&yield_req, 1); atomic_store(&stop_now, 1); } }
 
 static long long now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000LL + t.tv_nsec / 1000000; }
 
@@ -194,7 +195,9 @@ static void *reader(void *arg)
         if (fd < 0 && (fd = open(fifo_path, O_RDONLY | O_NONBLOCK)) < 0) { sleep(2); continue; }
         if (fd >= 0 && !sized) sized = fcntl(fd, F_SETPIPE_SZ, FIFO_BYTES) >= 0;
         struct pollfd p = { fd, POLLIN, 0 };
-        int r = poll(&p, 1, GAP_MS);
+        int r = poll(&p, 1, 200);
+        if (atomic_exchange(&stop_now, 0) && open_music) r = -2;           /* dropped (a new source, "stop", Home Assistant's pause): the stream ends now */
+        else if (r == 0 && !(open_music && now_ms() - last_data >= GAP_MS)) continue;     /* no audio this long: the sender paused or left */
         if (r > 0 && (p.revents & POLLIN)) {
             ssize_t n = read(fd, buf + have, sizeof buf - have);
             if (n > 0 && atomic_load(&enabled)) {

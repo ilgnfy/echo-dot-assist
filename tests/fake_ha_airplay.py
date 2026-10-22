@@ -5,7 +5,7 @@ and the Echo's name, a sender's audio reaches the music stream, a gap ends it, a
 sender (the child restarts), switched off stops the child and takes its mDNS records out."""
 import asyncio, os, re, sys, tempfile, time
 from esphome_common import check, until, sync, home_assistant, run, ROOT
-from aioesphomeapi import SwitchInfo, SwitchState
+from aioesphomeapi import SwitchInfo, SwitchState, MediaPlayerEntityState, MediaPlayerCommand
 
 PORT, HTTP_PORT, WEB, HTTPS_PORT, SELF_PORT = 17131, 17132, 17133, 17134, 17135
 AVAHI = tempfile.mkdtemp()
@@ -43,6 +43,17 @@ async def main(e):
     rd = lambda n: int(open(os.path.join(MIXER, n)).read())
     await until(lambda: rd("MainVolume") == 100 and rd("TTSVolume") == 100, 5)
     check(rd("MainVolume") == 100 and rd("TTSVolume") == 100, f"playing: the mixer at the top ({rd('MainVolume')}, {rd('TTSVolume')}), not at the Echo's volume 40")
+    # the media player entity in Home Assistant: playing while AirPlay does; its pause drops the sender
+    ha2 = await home_assistant(e); mp = ha2.mp[0]
+    await until(lambda: ha2.last(mp.key, MediaPlayerEntityState) == 2, 5)
+    check(mp.supports_pause and ha2.last(mp.key, MediaPlayerEntityState) == 2, f"the media player entity can pause and says playing while AirPlay does: {ha2.last(mp.key, MediaPlayerEntityState)}")
+    pid0 = open(conf + ".pid").read(); n0 = len(ha2.states)
+    ha2.cli.media_player_command(mp.key, command=MediaPlayerCommand.PAUSE)
+    await until(lambda: open(conf + ".pid").read() != pid0, 10)
+    check(open(conf + ".pid").read() != pid0, "Home Assistant's pause drops the AirPlay sender (the receiver is started anew)")
+    idle = any(isinstance(x, MediaPlayerEntityState) and int(x.state) == 1 for x in ha2.states[n0:])
+    check(idle, "and the media player entity said idle in between")
+    await ha2.cli.disconnect()
     # a gap ends the stream; played again it starts again
     os.unlink(conf + ".play")
     await asyncio.sleep(2.5)

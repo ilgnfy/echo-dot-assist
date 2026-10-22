@@ -406,7 +406,7 @@ While a phone plays, the proxy stops scanning: the radio cannot do both without 
 
 | Always there | |
 |---|---|
-| Media player | TTS, `play_media`; its volume is the Echo's (the music's, see [Separate volumes](#separate-volumes)) |
+| Media player | TTS, `play_media`; its volume is the Echo's (the music's, see [Separate volumes](#separate-volumes)). It says **playing** while AirPlay plays, and its pause and stop (Home Assistant's "stop the music", an automation, the dashboard) drop the AirPlay sender; AirPlay has no title or cover art there |
 | Mute, Do not disturb | DND drops announcements; purple flash when switched on |
 | Wake sound | covers all the Echo's own sounds |
 | Equalizer | bass, mid, treble, −6 to +6 dB, Amazon's own, on everything the Echo plays |

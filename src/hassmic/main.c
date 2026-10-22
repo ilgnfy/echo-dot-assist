@@ -1980,7 +1980,13 @@ static void mix_apply(void)                  /* lock held: the mixer's volumes a
 }
 
 /* airplay.c, with no lock held: AirPlay began or ended playing, and with it who the mixer is turned down from */
-void core_airplay_changed(void) { pthread_mutex_lock(&core_lock); mix_apply(); pthread_mutex_unlock(&core_lock); }
+void core_airplay_changed(void)
+{
+    pthread_mutex_lock(&core_lock);
+    mix_apply();
+    if (proto == &proto_esphome) esphome_media_changed();         /* the media player entity says playing, or not */
+    pthread_mutex_unlock(&core_lock);
+}
 
 static void tts_kind(int media)              /* the playback thread, at each start of the TTS stream */
 {
