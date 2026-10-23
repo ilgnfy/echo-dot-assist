@@ -11,7 +11,7 @@ which is why entities were gone. This page says what each side has so nothing is
 
 The fork is the original **without Amazon's cloud** (services removed, not stopped; no online updates, no Amazon downloads), **with** a settings page, a
 second wake word engine, several more features, **and AirPlay 2 on the Echo itself**. Everything the original shows in Home Assistant is there again, except
-what needed the cloud. What is still missing is one part of the original's core locking, left out on purpose (below).
+what needed the cloud. Of the original's hardening nothing is missing but the module split (below).
 
 ## Taken from the original (ported, written again for the fork's code)
 
@@ -32,7 +32,7 @@ what needed the cloud. What is still missing is one part of the original's core 
 
 | feature | where | state in the fork |
 |---|---|---|
-| The rest of **core locking and liveness** (`335f41a`): microphone audio through a queue and a sender thread of its own, so noise reduction and gain run outside `core_lock` | `main.c` | **deliberately not ported**: see below |
+| The rest of **core locking and liveness** (`335f41a`): microphone audio through a queue and a sender thread of its own, so noise reduction and gain run outside `core_lock` | `main.c` | **ported** (2026-10-23, below) |
 | Sendspin and Bluetooth hardening, Wyoming allowlist, push-port back-off, arbitration limits | `fix:` commits of 2026-10-05 | **ported** (above) |
 | Alexa on without a reboot | `scripts/alexa-on.sh` | not wanted any more (cloud-free) |
 | Online updates from GitHub, "Download from Amazon", whisper detection | `update.c` and others | removed on purpose (cloud-free) |
@@ -42,12 +42,13 @@ what needed the cloud. What is still missing is one part of the original's core 
 
 ## What was left out, and why
 
-**Microphone audio through a queue and a sender thread (part of `335f41a`).** In the original the capture thread, which also feeds the wake word,
-used to do noise reduction, gain and the write to the client under `core_lock`. A stalled client then made the wake word deaf. The fork has
-the other half of that fix, the per-connection write queue, so a stalled client no longer blocks anything. What is left is that RNNoise and the gain run for
-a few milliseconds per 30 ms block under the same lock. Moving that to a thread of its own would touch the audio ring, the echo suppressor and the
-noise reducer, which keep state between blocks and are single-threaded today, and the fork has changed all three. The risk (garbled microphone
-audio, a wake word that stops hearing) is larger than the gain, and it can only be tested on the PC. If a real stall is ever seen, this is the place to look.
+**Microphone audio through a queue and a sender thread (part of `335f41a`), ported 2026-10-23.** In the original the capture thread, which also feeds the wake word,
+used to do noise reduction, gain and the write to the client under `core_lock`; a stalled client made the wake word deaf. The fork had the write queue per connection
+(`outq.c`) but still ran RNNoise and the gain, a few milliseconds per 30 ms block, under the lock. Now the capture thread only takes our own sounds out (wake sound
+removal, which the original does not have) and queues 64 ms blocks (2 s, oldest dropped, logged as "mic: N ms dropped"); the thread `mic_sender` in `main.c` runs
+noise reduction and gain on its own copy of the settings and takes the lock only to send. The second of room before a command still primes RNNoise (as `ahead` blocks),
+a block carries the "hold the gain" flag of the sound it was cut in, and a pipeline that ended drops what is still queued (`mic_seq`). The PC suites pass unchanged
+(the noise reduction, gain, replay-ahead and arbitration tests all go through it).
 
 **The module split** (`core_int.h`, `mic.c`, `playback.c`, `wakedet.c`, `wakewords.c`, `spawn.c`, `a2dp.c` into five) is a different structure of the same code. It would
 conflict with every change the fork has made since, and gains nothing for a user.

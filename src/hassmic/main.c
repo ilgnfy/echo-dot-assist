@@ -244,8 +244,11 @@ static uint64_t barge_from;                         /* under lock: where that wa
 static uint64_t replay_from;                        /* under lock: the pipeline just started from a wake word that ended
                                                       * here; the capture thread sends the ring from there ahead of the live
                                                       * stream (stream_ring).  0: nothing to send */
-static struct micgain mic_gain;                     /* under lock: gain of what the pipeline hears (micgain.h) */
-static int mic_fresh;                               /* under lock: a pipeline started, the gain has not seen it yet */
+static struct micgain mic_gain;                     /* under lock: the gain settings as Home Assistant set them (micgain.h); the mic sender
+                                                      * works on a copy of its own (mic_sender) and takes a new one when mic_gain_gen moved */
+static unsigned mic_gain_gen;                       /* under lock: counts the settings' changes */
+static atomic_uint mic_seq;                         /* the pipeline the mic audio belongs to: counts pipeline starts */
+static int mic_fresh;                               /* under lock: a pipeline started (or the gain or noise settings changed), the next block says so */
 static float keyword_db = 1;                        /* under lock: rms of the last wake word, dBFS */
 static int mic_denoise;                             /* under lock: noise reduction ahead of the gain (micdenoise.h):
                                                       * 0 off, 1 low, 2 medium, 3 high */
@@ -673,6 +676,7 @@ static void pipeline_start(uint64_t from)    /* from: where the wake word that s
 {
     quiet_abort = 0;
     mic_fresh = 1;
+    atomic_fetch_add(&mic_seq, 1);
     replay_from = from;
     run_wake = from != 0;
     proto->start();
@@ -916,7 +920,7 @@ int core_soft_mute(int set)
 
 void core_mic_level(int dbfs)
 {
-    if (dbfs != mic_gain.level) { micgain_init(&mic_gain, dbfs); mic_fresh = 1; }
+    if (dbfs != mic_gain.level) { micgain_init(&mic_gain, dbfs); mic_gain_gen++; mic_fresh = 1; }
 }
 
 int core_wake_sound_removal(int set) { if (set >= 0) earsup_enable(set); return earsup_enabled(); }
@@ -1179,59 +1183,141 @@ static int kiosk_score(uint64_t end, int simulated)
     return (int)lround((speech - floor_) * 100);
 }
 
-/* lock held.  Mic audio to the pipeline: our own sounds taken out if switched on (earsup.h), noise reduction if
- * switched on, then brought to speech level.  at: the capture clock of the first sample (the ring's index).
+/* ---------------------------------------------------------------- mic audio to the pipeline
+ * The capture thread only takes our own sounds out (earsup.h, if switched on) and queues the blocks; the mic sender
+ * thread makes them ready and sends them.  The capture thread used to do it all under core_lock: noise reduction
+ * (RNNoise, about 1 ms per 10 ms frame) and the write to the client, which blocks for up to 5 s (SO_SNDTIMEO) when
+ * a client's Wi-Fi stalls, and the wake word, sound detection and the capture loop stopped for that long.  Now a
+ * stall only fills the queue, which drops its oldest blocks: a pipeline that far behind is lost anyway.  The sender
+ * takes the lock to read what changed and for each send (proto->audio's contract).  Ported from the original's
+ * `335f41a` (mic.c `mic_sender`), with the wake sound removal in front of it.
  * - The wake word just before it sets the gain to start with (from up to 3 s back), and RNNoise first hears the second
  *   of room and wake word ahead of the command, so that it does not start on the first word.
  * - Our own wake sound is still in the stream after the echo canceller: +21 dB over the floor in micRaw, +4 to +8 dB in
  *   micAsr (4 triggers, 2026-09-30), as loud as a quiet talker.  The gain took it for speech and came down for the
  *   command behind it (-32 instead of -26 dBFS in Home Assistant's recording), so it holds still while a sound plays,
- *   and over audio earsup held back across one. */
-static void send_out(const int16_t *pcm, size_t n, int held_sound)
+ *   and over audio earsup held back across one (the block's `held`). */
+#define MQ_BLOCK 1024                               /* samples: 64 ms, as earsup_run's pieces; a capture block (30-50 ms) is not split */
+#define MQ_SLOTS 32                                 /* 2 s: the 1 s ahead of a command (below) and a second of it */
+struct mblock { unsigned seq, n; int ahead, fresh, held, denoise; float kdb; int16_t pcm[MQ_BLOCK]; };
+static struct mblock mq[MQ_SLOTS];
+static unsigned mq_head, mq_count, mq_dropped;      /* under mq_lock */
+static pthread_mutex_t mq_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t mq_cond = PTHREAD_COND_INITIALIZER;
+static unsigned mq_seq;                             /* capture thread: the pipeline it queued for last */
+
+static void mq_add(const int16_t *s, size_t n, const struct mblock *tmpl)
 {
-    static int16_t out[1024 + MICDENOISE_FRAME];
-    mic_gain.hold = held_sound || atomic_load(&sounds_pending) || atomic_load(&earcon_sounding) || mono_ms() < atomic_load(&earcon_heard_until);
+    pthread_mutex_lock(&mq_lock);
     while (n) {
-        size_t k = n < 1024 ? n : 1024, m = k;
-        const int16_t *src = pcm;
-        if (mic_denoise) {
-            struct timespec t0, t1;
-            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t0);
-            m = micdenoise_run(pcm, k, out); src = out;
-            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
-            denoise_ns += (t1.tv_sec - t0.tv_sec) * 1000000000LL + t1.tv_nsec - t0.tv_nsec; denoise_frames += m / MICDENOISE_FRAME;
-        }
-        if (m) { micgain_run(&mic_gain, src, out, m); proto->audio(out, m * 2); }
-        pcm += k; n -= k;
+        size_t k = n < MQ_BLOCK ? n : MQ_BLOCK;
+        if (mq_count == MQ_SLOTS) { mq_head = (mq_head + 1) % MQ_SLOTS; mq_count--; mq_dropped++; }
+        struct mblock *b = &mq[(mq_head + mq_count++) % MQ_SLOTS];
+        *b = *tmpl; b->n = (unsigned)k; memcpy(b->pcm, s, k * 2);
+        s += k; n -= k;
     }
+    pthread_cond_signal(&mq_cond);
+    pthread_mutex_unlock(&mq_lock);
 }
 
+/* lock held, capture thread.  at: the ring's index of the first sample.  The first block of a pipeline brings the
+ * second before it along, for RNNoise to settle on the room (mic_sender): marked `ahead`, never sent. */
 static void send_mic(const int16_t *pcm, size_t n, uint64_t at)
 {
-    if (mic_fresh) {
-        micgain_start(&mic_gain, mono_ms() - last_wake_ms < 3000 ? keyword_db : 1); mic_fresh = 0;
-        static const int denoise_db[] = { 0, 6, 9, 12 };
-        fprintf(stderr, "mic gain: talker %.1f dBFS, gain %+.1f dB", micgain_talker_db(&mic_gain), mic_gain.gain_db);
-        if (mic_denoise) fprintf(stderr, ", noise reduction %d dB", denoise_db[mic_denoise]);
-        fprintf(stderr, "\n");
-        if (mic_denoise) {
-            micdenoise_reset(denoise_db[mic_denoise]);
-            for (uint64_t i = at > CAP_RATE ? at - CAP_RATE : 0; core_local_wake && i < at; ) {   /* the ring: local wake word only */
-                size_t o = i % RING_SAMPLES, k = at - i;
-                if (k > RING_SAMPLES - o) k = RING_SAMPLES - o;
-                micdenoise_run(ring + o, k, NULL);
-                i += k;
-            }
+    struct mblock t = { .seq = atomic_load(&mic_seq), .denoise = mic_denoise };
+    if (t.seq != mq_seq) {
+        mq_seq = t.seq;
+        struct mblock a = t; a.ahead = 1;
+        for (uint64_t i = at > CAP_RATE ? at - CAP_RATE : 0; core_local_wake && i < at; ) {     /* the ring: local wake word only */
+            size_t o = i % RING_SAMPLES, k = at - i;
+            if (k > RING_SAMPLES - o) k = RING_SAMPLES - o;
+            mq_add(ring + o, k, &a);
+            i += k;
         }
+    }
+    if (mic_fresh) {
+        t.fresh = 1; t.kdb = mono_ms() - last_wake_ms < 3000 ? keyword_db : 1; mic_fresh = 0;
         earsup_reset();
     }
     while (n) {
         size_t k = n < 1024 ? n : 1024, m;
         const int16_t *p; int held_sound;
         m = earsup_run(pcm, k, at, &p, &held_sound);
-        if (m) send_out(p, m, held_sound);
+        if (m) {
+            t.held = held_sound || atomic_load(&sounds_pending) || atomic_load(&earcon_sounding) || mono_ms() < atomic_load(&earcon_heard_until);
+            mq_add(p, m, &t);
+            t.fresh = 0;                                /* the first block of it only */
+        }
         pcm += k; n -= k; at += k;
     }
+}
+
+static int16_t mic_back[CAP_RATE];                  /* mic sender: the last second it got, for RNNoise to start on */
+static size_t mic_back_n, mic_back_at;
+
+static void mic_back_add(const int16_t *s, size_t n)
+{
+    for (size_t i = 0; i < n; i++) { mic_back[mic_back_at] = s[i]; mic_back_at = (mic_back_at + 1) % CAP_RATE; }
+    mic_back_n = mic_back_n + n > CAP_RATE ? CAP_RATE : mic_back_n + n;
+}
+
+static void mic_start(struct micgain *g, float kdb, int denoise)       /* mic sender: a pipeline (or new settings) */
+{
+    static const int denoise_db[] = { 0, 6, 9, 12 };
+    micgain_start(g, kdb);
+    fprintf(stderr, "mic gain: talker %.1f dBFS, gain %+.1f dB", micgain_talker_db(g), g->gain_db);
+    if (denoise) fprintf(stderr, ", noise reduction %d dB", denoise_db[denoise]);
+    fprintf(stderr, "\n");
+    if (!denoise) return;
+    micdenoise_reset(denoise_db[denoise]);
+    size_t from = (mic_back_at + CAP_RATE - mic_back_n) % CAP_RATE, k = CAP_RATE - from < mic_back_n ? CAP_RATE - from : mic_back_n;
+    micdenoise_run(mic_back + from, k, NULL);
+    if (k < mic_back_n) micdenoise_run(mic_back, mic_back_n - k, NULL);
+}
+
+static void *mic_sender(void *arg)
+{
+    static struct mblock b;
+    static int16_t out[MQ_BLOCK + MICDENOISE_FRAME];
+    static struct micgain g;
+    unsigned seq = 0, gen;
+    (void)arg;
+    pthread_mutex_lock(&core_lock); g = mic_gain; gen = mic_gain_gen; pthread_mutex_unlock(&core_lock);
+    for (;;) {
+        pthread_mutex_lock(&mq_lock);
+        while (!mq_count) pthread_cond_wait(&mq_cond, &mq_lock);
+        b = mq[mq_head]; mq_head = (mq_head + 1) % MQ_SLOTS; mq_count--;
+        unsigned dropped = mq_dropped; mq_dropped = 0;
+        pthread_mutex_unlock(&mq_lock);
+        if (dropped) fprintf(stderr, "mic: %u ms dropped, the client does not take the audio\n", dropped * MQ_BLOCK * 1000 / CAP_RATE);
+        if (b.seq != seq) { seq = b.seq; mic_back_n = 0; }
+        if (b.ahead) { mic_back_add(b.pcm, b.n); continue; }
+        if (b.seq != atomic_load(&mic_seq) || !atomic_load(&streaming)) continue;      /* that pipeline is over */
+
+        if (b.fresh) {
+            pthread_mutex_lock(&core_lock);
+            if (gen != mic_gain_gen) { gen = mic_gain_gen; g = mic_gain; }       /* else the talker's level carries over */
+            pthread_mutex_unlock(&core_lock);
+            mic_start(&g, b.kdb, b.denoise);
+        }
+        g.hold = b.held;
+        size_t m = b.n; const int16_t *src = b.pcm; long long ns = 0;
+        if (b.denoise) {
+            struct timespec t0, t1;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t0);
+            m = micdenoise_run(b.pcm, b.n, out); src = out;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
+            ns = (t1.tv_sec - t0.tv_sec) * 1000000000LL + t1.tv_nsec - t0.tv_nsec;
+        }
+        mic_back_add(b.pcm, b.n);
+        if (m) micgain_run(&g, src, out, m);
+
+        pthread_mutex_lock(&core_lock);
+        if (m && b.seq == atomic_load(&mic_seq) && atomic_load(&streaming) && connected) proto->audio(out, m * 2);
+        if (b.denoise) { denoise_ns += ns; denoise_frames += (unsigned)(m / MICDENOISE_FRAME); }
+        pthread_mutex_unlock(&core_lock);
+    }
+    return NULL;
 }
 
 static void stream_ring(uint64_t from, uint64_t to) /* capture thread, lock held: samples [from, to) as far as the ring has them */
@@ -2664,12 +2750,13 @@ int main(int argc, char **argv)
     if (arb_port && core_local_wake && proto->arb_send && arb_start(arb_port, core_node_name(), &arb_hooks)) fprintf(stderr, "arbitration: not available\n");
     if (dropin_port && arb_running() && dropin_start(dropin_port)) fprintf(stderr, "drop in: not available\n");
 
-    pthread_t cap_t, play_t, ear_t;
+    pthread_t cap_t, play_t, ear_t, mic_t;
     airplay_init();
     { pthread_t at; alarms_init(); if (!pthread_create(&at, NULL, alarm_thread, NULL)) pthread_detach(at); }
     /* a core thread that does not start leaves a satellite that cannot hear, speak or ring: better not to run at all than to look alive */
     if (pthread_create(&cap_t, NULL, capture_thread, NULL) || pthread_create(&play_t, NULL, playback_thread, NULL)
-        || pthread_create(&ear_t, NULL, earcon_thread, NULL)) { fprintf(stderr, "cannot start the core threads\n"); return 1; }
+        || pthread_create(&ear_t, NULL, earcon_thread, NULL)
+        || pthread_create(&mic_t, NULL, mic_sender, NULL)) { fprintf(stderr, "cannot start the core threads\n"); return 1; }
     { pthread_t vol_t; if (pthread_create(&vol_t, NULL, volume_led_thread, NULL)) fprintf(stderr, "cannot start the volume thread\n"); else pthread_detach(vol_t); }
 
     static const struct button_handler buttons = { on_action, on_mute, on_volume, on_pair, on_hold, button_event };

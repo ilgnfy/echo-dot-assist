@@ -4,6 +4,8 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-10-23
 
+- **Microphone audio goes through a queue** (from the original): noise reduction and the gain run on a thread of their own, so a slow Home Assistant or a busy Echo can no longer make the wake word deaf. A client that does not take the audio loses the oldest part (logged), nothing else waits.
+
 - **Illuminance is back by default**: the "Light sensor" feature is on again, as in the original, so the room's light in lux shows up in Home Assistant after the update (switch it off on the page to stop "LED brightness" following auto brightness in the logbook).
 
 ## 2026-10-22
