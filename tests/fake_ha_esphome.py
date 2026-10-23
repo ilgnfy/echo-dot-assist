@@ -52,9 +52,9 @@ async def main(e):
           and any(isinstance(x, NumberState) and x.key == eqs[2].key and x.state == -6 for x in states), "equalizer commands reflected, clamped to -6..+6")
     check(pv("noise_reduction") == 0, "noise reduction off by default")
     lux, lauto, lbright = by.get("illuminance"), by.get("led_auto_brightness"), by.get("led_brightness")
-    check(lux is None and pv("light_sensor") == 0
+    check(isinstance(lux, SensorInfo) and pv("light_sensor") == 1
           and isinstance(lauto, SwitchInfo) and isinstance(lbright, NumberInfo) and (lbright.min_value, lbright.max_value) == (0, 100),
-          "LED brightness entities listed, the light sensor off by default (no illuminance)")
+          "LED brightness entities listed, the light sensor on by default (illuminance listed, as in the original)")
     last = lambda k, t: ([x.state for x in states if isinstance(x, t) and x.key == k] or [None])[-1]
     await until(lambda: last(lbright.key, NumberState) is not None)
     check(last(lauto.key, SwitchState) is True and last(lbright.key, NumberState) == 80,

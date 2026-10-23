@@ -452,7 +452,7 @@ Echo announces itself again after 100 s without Home Assistant, then less and le
 | [Sound detection](#sound-detection) | Sound (event) |
 | Wake word events (off by default) | Wake word (event): `detected` (the Echo took it), `near_miss` (Amazon's engine heard something close, did not wake; none with microWakeWord), `answered_elsewhere` (another Echo or satellite answered), `no_speech` (woke, nothing said). A `detected` followed by `no_speech` is a false wake. Nothing while muted. Near misses can come often while the TV plays: an entry in Home Assistant's history each |
 | [Wi-Fi motion](#wi-fi-motion) | motion sensor, sensitivity |
-| Light sensor (off by default) | Illuminance (the room's light in lux); "LED brightness" then also follows auto brightness, an entry in the logbook every few minutes. Off, it shows only levels you set |
+| Light sensor (on by default, as in the original) | Illuminance (the room's light in lux); "LED brightness" also follows auto brightness, an entry in the logbook every few minutes. Switched off, Illuminance is gone and it shows only levels you set |
 | Bluetooth audio from phones | Bluetooth phones: pairing |
 | [Playing on a Bluetooth speaker](#playing-on-a-bluetooth-speaker) | Bluetooth speaker: search, Bluetooth speaker: play on it, Bluetooth speaker: status, Bluetooth speaker: delay |
 | [Separate volumes](#separate-volumes) (off by default, on the Volume card) | Assistant volume, Sounds volume, Timer volume, Call volume (each while it has its own; calls with Drop In) |

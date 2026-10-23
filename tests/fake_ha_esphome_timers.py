@@ -236,6 +236,9 @@ async def main(e):
         es, _ = await n.list_entities_services(); sts = []; n.subscribe_states(sts.append); await sync(n)
         return n, {x.object_id: x for x in es}, sts
     # the light sensor: switched on, the illuminance entity, sent on a real change, not on flicker
+    page.set(light_sensor="off")
+    c, cby, st3 = await relist(c)
+    check("illuminance" not in cby, "light sensor switched off on the page: no illuminance")
     page.set(light_sensor="on")
     c, cby, st3 = await relist(c)
     lux = cby.get("illuminance")

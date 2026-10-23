@@ -46,7 +46,7 @@ static const char *bt_lang_codes[sizeof bt_langs / sizeof bt_langs[0]];
 
 static int mic_level = MICGAIN_LEVEL, bt_lang;
 static int bt_audio = 1, bt_speaker;      /* features kept here; bt_speaker's default: settings_load */
-static int light_sensor;                                /* off: auto brightness moved the level in HA's history all day (forum, 2026-10-15) */
+static int light_sensor = 1;                            /* on as in the original: Illuminance listed; off stops "LED brightness" following auto brightness in HA's history (forum, 2026-10-15) */
 static int bt_stay;                                     /* a2dp.c gets it only while the feature is on: off drops the link */
 static int wake_events;                                 /* off: an event per near miss is HA history most homes never read */
 

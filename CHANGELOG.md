@@ -2,6 +2,10 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-10-23
+
+- **Illuminance is back by default**: the "Light sensor" feature is on again, as in the original, so the room's light in lux shows up in Home Assistant after the update (switch it off on the page to stop "LED brightness" following auto brightness in the logbook).
+
 ## 2026-10-22
 
 - **One media player for everything the Echo plays**: it says "playing" while Sendspin (Music Assistant), a phone over Bluetooth or AirPlay plays, its pause and stop pause what plays and its play resumes it, and Home Assistant can still play audio on it. **AirPlay's title, artist and album** are three text sensors beside it ("AirPlay title", "AirPlay artist", "AirPlay album"); docs/airplay.md has a dashboard card that shows them under the player.
