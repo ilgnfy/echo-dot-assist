@@ -11,7 +11,7 @@ which is why entities were gone. This page says what each side has so nothing is
 
 The fork is the original **without Amazon's cloud** (services removed, not stopped; no online updates, no Amazon downloads), **with** a settings page, a
 second wake word engine, several more features, **and AirPlay 2 on the Echo itself**. Everything the original shows in Home Assistant is there again, except
-what needed the cloud. What is still missing is the original's hardening of the satellite core (below).
+what needed the cloud. What is still missing is one part of the original's core locking, left out on purpose (below).
 
 ## Taken from the original (ported, written again for the fork's code)
 
@@ -82,7 +82,8 @@ its owner's key and talks to no cloud.
 | Alarm 1-3, Alarm ringing, Next alarm, Snooze alarm, Stop alarm | yes | yes |
 | Memory used / available, Load average, Top processes, Last kill | yes | yes |
 | Bluetooth AAC, Bluetooth proxy: secure pairing only, Wi-Fi setup over Bluetooth | yes | yes |
-| Bluetooth speaker group (search, play on, status, delay), Illuminance | yes | when the feature is on |
+| Illuminance | yes | yes (feature "Light sensor", on by default as in the original) |
+| Bluetooth speaker group (search, play on, status, delay) | yes | when the feature is on |
 | Firmware (update, with an install button) | yes | a text sensor with the version (online updates removed) |
 | Online updates (select) | yes | **removed** (GitHub) |
 | Last request whispered | yes | **removed** (needed Amazon's download) |
