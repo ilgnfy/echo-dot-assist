@@ -366,5 +366,5 @@ Wi-Fi, only USB is left, so solder the USB wires before experimenting.
 - The seven ACE/MediaTek daemons above were identified from their libraries, who maps their client libraries and their logs (2026-10-21), not removed one by one.
   `ace_sensorsd` had no client and was removed and tested; `ace_thermald` and `kisd` have no client either but protect the hardware and the keys.
 - Decided against a dead-man switch for now (the USB wires are the safety net); idea: after `apply`, a flag that makes `main.sh` put the quarantine back and reboot when the Echo has no IP address after a few minutes (cleared by `verify`).  Until then the USB wires are the safety net.
-- `light blue flashes until Home Assistant is connected` and AirPlay 2 are in PLAN.md.
+- AirPlay 2 is in PLAN.md (the light blue flash until Home Assistant connects was dropped).
 - The `alexa-*` helper scripts are still in the tree (they have nothing left to start).

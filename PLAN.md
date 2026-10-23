@@ -2272,9 +2272,9 @@ engine, the light ring, the buttons, power and Wi-Fi.  Method, results and traps
 
 ## To do (not started)
 
-### Light blue flashes until Home Assistant is connected (to do, with AirPlay 2 below)
+### Light blue flashes until Home Assistant is connected (dropped 2026-10-23)
 
-Wish of 2026-10-21; nothing built.  After a start, and whenever the link to Home Assistant is gone, the Echo looks the same as one that works
+Dropped by the owner 2026-10-23 (as were the SHT40 sensor and Drop In via phone); kept as an idea.  Wish of 2026-10-21; nothing built.  After a start, and whenever the link to Home Assistant is gone, the Echo looks the same as one that works
 (wake word and buttons are dead until `core_link` is ready, which takes minutes after a boot), so nothing tells the owner it is still trying.  Show a
 light blue flash on the ring while the Echo is not connected (not set up: stock's orange setup spinner stays), off at once when HA's voice assistant
 subscribed.  Via `led()` -> `ring_set`, a pattern of its own (a new slot id in `ring_slots`: ids are stored, keep them), and it must give way to the mute
